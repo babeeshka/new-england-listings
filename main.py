@@ -1,28 +1,27 @@
 # main.py
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from scraper import extract_listing_data
 from notion_integration import create_notion_entry
 
 app = FastAPI(
     title="New England Listings API",
-    description="Scrapes listing data from a provided URL and creates an entry in Notion",
+    description="Scrapes property data from a given URL and creates an entry in Notion.",
     version="1.0.0"
 )
 
+# Define a Pydantic model for the request body
+class ListingRequest(BaseModel):
+    url: str
+
 @app.post("/add_listing")
-async def add_listing(req: Request):
-    try:
-        req_data = await req.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON payload")
-    
-    url = req_data.get("url")
+async def add_listing(listing_request: ListingRequest):
+    url = listing_request.url
     if not url:
         raise HTTPException(status_code=400, detail="URL not provided")
-    
     try:
-        # Extract listing data using your scraper.
+        # Extract listing data from the provided URL.
         data = extract_listing_data(url)
         # Create a new entry in your Notion database.
         result = create_notion_entry(data)
