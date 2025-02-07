@@ -1,0 +1,6 @@
+requests
+beautifulsoup4
+notion-client
+fastapi
+uvicorn
+selenium
