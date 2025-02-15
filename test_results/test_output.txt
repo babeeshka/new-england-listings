@@ -1,0 +1,151 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.1, pytest-8.3.4, pluggy-1.5.0 -- /Users/wbabich/Documents/_projects/new-england-listings/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/wbabich/Documents/_projects/new-england-listings
+configfile: pytest.ini
+plugins: cov-6.0.0, anyio-4.8.0, xdist-3.6.1
+collecting ... collected 27 items
+
+tests/test_extractors/test_farmland.py::test_listing_name_extraction PASSED [  3%]
+tests/test_extractors/test_farmland.py::test_acreage_extraction FAILED   [  7%]
+tests/test_extractors/test_farmland.py::test_location_extraction FAILED  [ 11%]
+tests/test_extractors/test_farmland.py::test_farm_details_extraction PASSED [ 14%]
+tests/test_extractors/test_landandfarm.py::test_landandfarm_price_extraction PASSED [ 18%]
+tests/test_extractors/test_landandfarm.py::test_landandfarm_acreage_extraction FAILED [ 22%]
+tests/test_extractors/test_realtor.py::test_listing_name_extraction PASSED [ 25%]
+tests/test_extractors/test_realtor.py::test_price_extraction PASSED      [ 29%]
+tests/test_extractors/test_realtor.py::test_location_extraction FAILED   [ 33%]
+tests/test_extractors/test_realtor.py::test_details_extraction PASSED    [ 37%]
+tests/test_integration/test_scraper.py::test_landandfarm_integration FAILED [ 40%]
+tests/test_integration/test_scraper.py::test_realtor_integration FAILED  [ 44%]
+tests/test_integration/test_scraper.py::test_farmland_integration FAILED [ 48%]
+tests/test_utils/test_text.py::TestPriceCleaning::test_clean_price_basic PASSED [ 51%]
+tests/test_utils/test_text.py::TestPriceCleaning::test_clean_price_contact PASSED [ 55%]
+tests/test_utils/test_text.py::TestPriceCleaning::test_clean_price_million FAILED [ 59%]
+tests/test_utils/test_text.py::TestPriceCleaning::test_clean_price_invalid PASSED [ 62%]
+tests/test_utils/test_text.py::TestAcreageExtraction::test_extract_acreage_basic PASSED [ 66%]
+tests/test_utils/test_text.py::TestAcreageExtraction::test_extract_acreage_decimal PASSED [ 70%]
+tests/test_utils/test_text.py::TestAcreageExtraction::test_extract_acreage_text_variants PASSED [ 74%]
+tests/test_utils/test_text.py::TestAcreageExtraction::test_extract_acreage_invalid PASSED [ 77%]
+tests/test_utils/test_text.py::TestHTMLCleaning::test_clean_html_basic PASSED [ 81%]
+tests/test_utils/test_text.py::TestHTMLCleaning::test_clean_html_special_chars PASSED [ 85%]
+tests/test_utils/test_text.py::TestHTMLCleaning::test_clean_html_newlines PASSED [ 88%]
+tests/test_utils/test_text.py::TestPropertyTypeExtraction::test_extract_property_type_basic PASSED [ 92%]
+tests/test_utils/test_text.py::TestPropertyTypeExtraction::test_extract_property_type_variants PASSED [ 96%]
+tests/test_utils/test_text.py::TestPropertyTypeExtraction::test_extract_property_type_unknown PASSED [100%]
+
+=================================== FAILURES ===================================
+___________________________ test_acreage_extraction ____________________________
+tests/test_extractors/test_farmland.py:37: in test_acreage_extraction
+    assert data["acreage_bucket"] == "Very Large"
+E   AssertionError: assert 'Extensive (100+ acres)' == 'Very Large'
+E     
+E     - Very Large
+E     + Extensive (100+ acres)
+------------------------------ Captured log call -------------------------------
+WARNING  new_england_listings.utils.dates:dates.py:78 Could not find listing date for Maine Farmland Trust, using current date
+___________________________ test_location_extraction ___________________________
+tests/test_extractors/test_farmland.py:44: in test_location_extraction
+    assert "ME" in data["location"]
+E   AssertionError: assert 'ME' in 'Located in Brunswick'
+------------------------------ Captured log call -------------------------------
+WARNING  new_england_listings.utils.dates:dates.py:78 Could not find listing date for Maine Farmland Trust, using current date
+_____________________ test_landandfarm_acreage_extraction ______________________
+tests/test_extractors/test_landandfarm.py:26: in test_landandfarm_acreage_extraction
+    assert data["acreage_bucket"] == "Medium"
+E   AssertionError: assert 'Medium (5-20 acres)' == 'Medium'
+E     
+E     - Medium
+E     + Medium (5-20 acres)
+------------------------------ Captured log call -------------------------------
+WARNING  new_england_listings.utils.dates:dates.py:78 Could not find listing date for Land and Farm, using current date
+___________________________ test_location_extraction ___________________________
+tests/test_extractors/test_realtor.py:42: in test_location_extraction
+    assert "Portland" in data["location"]
+E   AssertionError: assert 'Portland' in 'Location Unknown'
+------------------------------ Captured log call -------------------------------
+WARNING  new_england_listings.utils.dates:dates.py:78 Could not find listing date for Realtor.com, using current date
+_________________________ test_landandfarm_integration _________________________
+tests/test_integration/test_scraper.py:12: in test_landandfarm_integration
+    assert "Windham" in data["location"]
+E   AssertionError: assert 'Windham' in 'Location Unknown'
+------------------------------ Captured log call -------------------------------
+WARNING  new_england_listings.utils.dates:dates.py:78 Could not find listing date for Land and Farm, using current date
+___________________________ test_realtor_integration ___________________________
+tests/test_integration/test_scraper.py:22: in test_realtor_integration
+    assert "West Bath" in data["location"]
+E   AssertionError: assert 'West Bath' in 'so'
+------------------------------ Captured log call -------------------------------
+WARNING  new_england_listings.utils.dates:dates.py:78 Could not find listing date for Realtor.com, using current date
+__________________________ test_farmland_integration ___________________________
+tests/test_integration/test_scraper.py:29: in test_farmland_integration
+    data = process_listing(url, use_notion=False)
+src/new_england_listings/__init__.py:45: in process_listing
+    data = extractor.extract(soup)
+src/new_england_listings/extractors/base.py:66: in extract
+    self.extract_additional_data()
+src/new_england_listings/extractors/farmland.py:202: in extract_additional_data
+    acreage, acreage_bucket = self.extract_acreage_info()
+src/new_england_listings/extractors/farmland.py:167: in extract_acreage_info
+    if float(acres.split()[0]) < threshold:
+E   ValueError: could not convert string to float: 'Not'
+------------------------------ Captured log call -------------------------------
+ERROR    new_england_listings:__init__.py:49 Error extracting data: could not convert string to float: 'Not'
+__________________ TestPriceCleaning.test_clean_price_million __________________
+tests/test_utils/test_text.py:22: in test_clean_price_million
+    assert clean_price("$1,500,000") == ("$1.5M", "1.5M - $2M")
+E   AssertionError: assert ('$1.5M', '$1.5M - $2M') == ('$1.5M', '1.5M - $2M')
+E     
+E     At index 1 diff: '$1.5M - $2M' != '1.5M - $2M'
+E     
+E     Full diff:
+E       (
+E           '$1.5M',
+E     -     '1.5M - $2M',
+E     +     '$1.5M - $2M',
+E     ?      +
+E       )
+=============================== warnings summary ===============================
+src/new_england_listings/utils/dates.py:64
+  /Users/wbabich/Documents/_projects/new-england-listings/src/new_england_listings/utils/dates.py:64: SyntaxWarning: invalid escape sequence '\.'
+    match = re.search(f"{indicator}([^\.]+)", text, re.I)
+
+tests/test_integration/test_scraper.py:6
+  /Users/wbabich/Documents/_projects/new-england-listings/tests/test_integration/test_scraper.py:6: PytestUnknownMarkWarning: Unknown pytest.mark.integration - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.integration  # Mark as integration test
+
+tests/test_integration/test_scraper.py:16
+  /Users/wbabich/Documents/_projects/new-england-listings/tests/test_integration/test_scraper.py:16: PytestUnknownMarkWarning: Unknown pytest.mark.integration - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.integration
+
+tests/test_integration/test_scraper.py:26
+  /Users/wbabich/Documents/_projects/new-england-listings/tests/test_integration/test_scraper.py:26: PytestUnknownMarkWarning: Unknown pytest.mark.integration - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.integration
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_extractors/test_farmland.py::test_acreage_extraction - AssertionError: assert 'Extensive (100+ acres)' == 'Very Large'
+  
+  - Very Large
+  + Extensive (100+ acres)
+FAILED tests/test_extractors/test_farmland.py::test_location_extraction - AssertionError: assert 'ME' in 'Located in Brunswick'
+FAILED tests/test_extractors/test_landandfarm.py::test_landandfarm_acreage_extraction - AssertionError: assert 'Medium (5-20 acres)' == 'Medium'
+  
+  - Medium
+  + Medium (5-20 acres)
+FAILED tests/test_extractors/test_realtor.py::test_location_extraction - AssertionError: assert 'Portland' in 'Location Unknown'
+FAILED tests/test_integration/test_scraper.py::test_landandfarm_integration - AssertionError: assert 'Windham' in 'Location Unknown'
+FAILED tests/test_integration/test_scraper.py::test_realtor_integration - AssertionError: assert 'West Bath' in 'so'
+FAILED tests/test_integration/test_scraper.py::test_farmland_integration - ValueError: could not convert string to float: 'Not'
+FAILED tests/test_utils/test_text.py::TestPriceCleaning::test_clean_price_million - AssertionError: assert ('$1.5M', '$1.5M - $2M') == ('$1.5M', '1.5M - $2M')
+  
+  At index 1 diff: '$1.5M - $2M' != '1.5M - $2M'
+  
+  Full diff:
+    (
+        '$1.5M',
+  -     '1.5M - $2M',
+  +     '$1.5M - $2M',
+  ?      +
+    )
+================== 8 failed, 19 passed, 4 warnings in 13.80s ===================
