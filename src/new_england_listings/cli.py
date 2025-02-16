@@ -3,42 +3,54 @@ import argparse
 import json
 import logging
 import sys
-import traceback
 from typing import List, Optional
 from .main import process_listing
 from . import __version__
 
 
 def setup_logging(verbose: bool = False):
-    """Configure logging based on verbosity level."""
-    level = logging.DEBUG if verbose else logging.INFO
+    """Configure logging with focused debug output."""
+    # Create formatters
+    detailed_formatter = logging.Formatter(
+        '%(asctime)s - %(levelname)s - %(name)s - %(message)s'
+    )
+    simple_formatter = logging.Formatter(
+        '%(levelname)s - %(message)s'
+    )
 
-    # Remove any existing handlers
+    # Remove existing handlers
     root = logging.getLogger()
     for handler in root.handlers[:]:
         root.removeHandler(handler)
 
+    # Console handler - keep it minimal
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(simple_formatter)
+    console_handler.setLevel(logging.INFO)
+
+    # Debug file handler - focus on extraction process
+    file_handler = logging.FileHandler('extraction_debug.log', mode='w')
+    file_handler.setFormatter(detailed_formatter)
+    file_handler.setLevel(logging.DEBUG)
+
     # Configure root logger
-    logging.basicConfig(
-        level=level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        stream=sys.stdout,  # Explicitly log to stdout
-        force=True
-    )
-
-    # Create a file handler for debug.log
-    file_handler = logging.FileHandler('debug.log', mode='w')
-    file_handler.setLevel(level)
-    file_handler.setFormatter(logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-
-    # Add file handler to root logger
+    root.addHandler(console_handler)
     root.addHandler(file_handler)
+    root.setLevel(logging.DEBUG if verbose else logging.INFO)
 
-    # Set level for key loggers
-    for logger_name in ['new_england_listings', 'selenium', 'urllib3']:
-        logging.getLogger(logger_name).setLevel(level)
+    # Silence noisy modules
+    for logger_name in ['urllib3', 'selenium', 'WDM', 'websockets']:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
 
+    # Ensure our extractors log at appropriate level
+    extractor_logger = logging.getLogger('new_england_listings.extractors')
+    extractor_logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+
+    # Add specific handler for HTML content
+    html_handler = logging.FileHandler('html_content.log', mode='w')
+    html_handler.setFormatter(logging.Formatter('%(message)s'))
+    html_handler.addFilter(lambda record: 'HTML Content' in record.msg)
+    extractor_logger.addHandler(html_handler)
 
 def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse command line arguments."""
@@ -72,6 +84,11 @@ def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--debug-file",
+        help="Write detailed debug logs to specified file"
+    )
+
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}"
@@ -80,72 +97,30 @@ def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
     return parser.parse_args(args)
 
 
-def check_dependencies():
-    """Check if required dependencies are installed."""
-    logger = logging.getLogger(__name__)
-    logger.debug("Checking dependencies...")
-
-    try:
-        from selenium import webdriver
-        from selenium.webdriver.chrome.service import Service
-        from webdriver_manager.chrome import ChromeDriverManager
-
-        logger.debug("Installing ChromeDriver...")
-        service = Service(ChromeDriverManager().install())
-        logger.debug("ChromeDriver installed successfully")
-
-        logger.debug("Configuring Chrome options...")
-        options = webdriver.ChromeOptions()
-        options.add_argument('--headless')
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-dev-shm-usage')
-
-        logger.debug("Initializing Chrome driver...")
-        driver = webdriver.Chrome(service=service, options=options)
-        driver.quit()
-
-        logger.info("Chrome and ChromeDriver are properly configured")
-        return True
-    except Exception as e:
-        logger.error(f"Dependency check failed: {str(e)}")
-        logger.debug("Stack trace:", exc_info=True)
-        return False
-
-
 def main(args: Optional[List[str]] = None):
     """Main entry point for the CLI."""
-    logger = logging.getLogger(__name__)
-    logger.debug("Starting main function...")
-
     try:
         parsed_args = parse_args(args)
         setup_logging(parsed_args.verbose)
-
-        logger.info("Starting extraction process...")
-        logger.debug(f"Arguments: {parsed_args}")
-
-        if not check_dependencies():
-            logger.error("Required dependencies are not properly configured")
-            sys.exit(1)
+        logger = logging.getLogger(__name__)
 
         results = []
         errors = []
 
         for i, url in enumerate(parsed_args.urls, 1):
-            logger.info(f"[{i}/{len(parsed_args.urls)}] Processing URL: {url}")
+            logger.info(f"Processing URL {i}/{len(parsed_args.urls)}: {url}")
             try:
-                logger.debug(f"Calling process_listing for URL: {url}")
                 data = process_listing(
                     url, use_notion=not parsed_args.no_notion)
-                logger.info("Successfully extracted data")
-                logger.debug(f"Extracted data: {json.dumps(data, indent=2)}")
                 results.append(data)
+                logger.info(f"Successfully processed {url}")
+                if parsed_args.verbose:
+                    logger.info(
+                        f"Extracted data: {json.dumps(data, indent=2)}")
             except Exception as e:
                 error_msg = f"Error processing {url}: {str(e)}"
                 logger.error(error_msg)
-                logger.debug("Stack trace:", exc_info=True)
-                errors.append({"url": url, "error": error_msg,
-                              "traceback": traceback.format_exc()})
+                errors.append({"url": url, "error": error_msg})
                 continue
 
         output = {
@@ -156,10 +131,11 @@ def main(args: Optional[List[str]] = None):
             "failed": len(errors)
         }
 
+        # Only output the JSON results once
         if parsed_args.output:
-            logger.debug(f"Writing output to file: {parsed_args.output}")
             with open(parsed_args.output, 'w') as f:
                 json.dump(output, f, indent=2)
+            logger.info(f"Results written to {parsed_args.output}")
         else:
             print(json.dumps(output, indent=2))
 
@@ -167,8 +143,7 @@ def main(args: Optional[List[str]] = None):
             sys.exit(1)
 
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
-        logger.debug("Stack trace:", exc_info=True)
+        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
         sys.exit(1)
 
 

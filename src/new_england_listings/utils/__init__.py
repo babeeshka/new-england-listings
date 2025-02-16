@@ -1,8 +1,9 @@
-# ./src/new_england_listings/utils/__init__.py
+# src/new_england_listings/utils/__init__.py
 """Utility functions for New England Listings."""
 
 import logging
-from .browser import get_page_content, get_selenium_driver
+# Changed from get_selenium_driver
+from .browser import get_page_content, get_stealth_driver
 from .dates import extract_listing_date, parse_date_string, is_recent_listing
 from .geocoding import (
     get_location_coordinates,
@@ -18,7 +19,7 @@ from .text import (
 
 __all__ = [
     "get_page_content",
-    "get_selenium_driver",
+    "get_stealth_driver",  # Changed from get_selenium_driver
     "extract_listing_date",
     "parse_date_string",
     "is_recent_listing",
