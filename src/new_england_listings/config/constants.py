@@ -53,25 +53,155 @@ SCHOOL_RATING_BUCKETS: Dict[int, str] = {
 
 # Major cities in New England with their coordinates and additional metadata
 MAJOR_CITIES: Dict[str, Dict[str, any]] = {
+    # Maine Cities
     "Portland, ME": {
         "coordinates": (43.6591, -70.2568),
         "population": 66882,
-        "amenities": ["Airport", "Seaport", "Universities"],
-        "state": "ME"
+        "amenities": ["Airport", "Seaport", "Universities", "Hospital", "Arts District"],
+        "state": "ME",
+        "school_rating": 7
     },
     "Augusta, ME": {
         "coordinates": (44.3107, -69.7795),
         "population": 18899,
-        "amenities": ["State Capital", "Hospital"],
-        "state": "ME"
+        "amenities": ["State Capital", "Hospital", "Government Center"],
+        "state": "ME",
+        "school_rating": 6
     },
+    "Bangor, ME": {
+        "coordinates": (44.8016, -68.7712),
+        "population": 31903,
+        "amenities": ["Airport", "Hospital", "University", "Shopping Mall"],
+        "state": "ME",
+        "school_rating": 7
+    },
+    "Lewiston, ME": {
+        "coordinates": (44.1003, -70.2147),
+        "population": 36592,
+        "amenities": ["Hospital", "Bates College", "Arts Center"],
+        "state": "ME",
+        "school_rating": 6
+    },
+
+    # New Hampshire Cities
+    "Manchester, NH": {
+        "coordinates": (42.9956, -71.4548),
+        "population": 112673,
+        "amenities": ["Airport", "Hospital", "Shopping Mall", "Universities"],
+        "state": "NH",
+        "school_rating": 7
+    },
+    "Concord, NH": {
+        "coordinates": (43.2081, -71.5376),
+        "population": 43976,
+        "amenities": ["State Capital", "Hospital", "Cultural Center"],
+        "state": "NH",
+        "school_rating": 8
+    },
+    "Nashua, NH": {
+        "coordinates": (42.7654, -71.4676),
+        "population": 89355,
+        "amenities": ["Hospital", "Shopping Centers", "Parks"],
+        "state": "NH",
+        "school_rating": 8
+    },
+    "Portsmouth, NH": {
+        "coordinates": (43.0718, -70.7626),
+        "population": 21956,
+        "amenities": ["Seaport", "Historic District", "Hospital"],
+        "state": "NH",
+        "school_rating": 9
+    },
+
+    # Vermont Cities
     "Burlington, VT": {
         "coordinates": (44.4759, -73.2121),
         "population": 42819,
-        "amenities": ["University", "Lake Champlain"],
-        "state": "VT"
+        "amenities": ["University", "Lake Champlain", "Hospital", "Airport"],
+        "state": "VT",
+        "school_rating": 8
     },
-    # Add more cities with detailed information...
+    "Montpelier, VT": {
+        "coordinates": (44.2601, -72.5754),
+        "population": 7855,
+        "amenities": ["State Capital", "Hospital", "Arts Center"],
+        "state": "VT",
+        "school_rating": 8
+    },
+    "Rutland, VT": {
+        "coordinates": (43.6106, -72.9726),
+        "population": 15807,
+        "amenities": ["Hospital", "Shopping Center", "Ski Areas Nearby"],
+        "state": "VT",
+        "school_rating": 7
+    },
+    "Brattleboro, VT": {
+        "coordinates": (42.8509, -72.5579),
+        "population": 11765,
+        "amenities": ["Hospital", "Arts Community", "Farmers Market"],
+        "state": "VT",
+        "school_rating": 7
+    },
+
+    # Massachusetts Cities
+    "Boston, MA": {
+        "coordinates": (42.3601, -71.0589),
+        "population": 675647,
+        "amenities": ["Major Airport", "Universities", "Hospitals", "Seaport"],
+        "state": "MA",
+        "school_rating": 8
+    },
+    "Worcester, MA": {
+        "coordinates": (42.2626, -71.8023),
+        "population": 185428,
+        "amenities": ["Universities", "Hospital", "Cultural Center"],
+        "state": "MA",
+        "school_rating": 7
+    },
+    "Springfield, MA": {
+        "coordinates": (42.1015, -72.5898),
+        "population": 155929,
+        "amenities": ["Hospital", "Universities", "Museums"],
+        "state": "MA",
+        "school_rating": 6
+    },
+    "Pittsfield, MA": {
+        "coordinates": (42.4501, -73.2567),
+        "population": 42931,
+        "amenities": ["Hospital", "Cultural District", "Berkshires"],
+        "state": "MA",
+        "school_rating": 7
+    },
+
+    # Additional Important Towns
+    "Stowe, VT": {
+        "coordinates": (44.4654, -72.6874),
+        "population": 4314,
+        "amenities": ["Ski Resort", "Tourist Destination", "Medical Center"],
+        "state": "VT",
+        "school_rating": 9
+    },
+    "North Conway, NH": {
+        "coordinates": (44.0537, -71.1284),
+        "population": 2349,
+        "amenities": ["Ski Areas", "Shopping Outlets", "Medical Center"],
+        "state": "NH",
+        "school_rating": 7
+    },
+    "Bar Harbor, ME": {
+        "coordinates": (44.3876, -68.2039),
+        "population": 5515,
+        "amenities": ["Acadia National Park", "Hospital", "Tourist Destination"],
+        "state": "ME",
+        "school_rating": 8
+    },
+    "Northampton, MA": {
+        "coordinates": (42.3251, -72.6412),
+        "population": 28451,
+        "amenities": ["Smith College", "Arts Community", "Hospital"],
+        "state": "MA",
+        "school_rating": 8
+    }
 }
 
 # Extended date patterns including relative dates

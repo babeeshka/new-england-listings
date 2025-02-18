@@ -5,6 +5,8 @@ from .base import BaseExtractor
 from .realtor import RealtorExtractor
 from .landandfarm import LandAndFarmExtractor
 from .farmland import FarmlandExtractor
+from .landsearch import LandSearchExtractor
+from .farmlink import FarmLinkExtractor
 from .utils import get_extractor_for_url
 
 __all__ = [
@@ -12,5 +14,7 @@ __all__ = [
     "RealtorExtractor",
     "LandAndFarmExtractor",
     "FarmlandExtractor",
+    "LandSearchExtractor",
+    "FarmLinkExtractor",
     "get_extractor_for_url"
 ]

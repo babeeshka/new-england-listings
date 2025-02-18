@@ -7,7 +7,12 @@ import logging
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
 from geopy.exc import GeocoderTimedOut
-from ..config.constants import MAJOR_CITIES, DISTANCE_BUCKETS
+from ..config.constants import (
+    MAJOR_CITIES,
+    DISTANCE_BUCKETS,
+    SCHOOL_RATING_BUCKETS,
+    POPULATION_BUCKETS
+)
 
 logger = logging.getLogger(__name__)
 
@@ -16,11 +21,11 @@ def get_distance(point1: Union[Tuple[float, float], str], point2: Union[Tuple[fl
     """
     Calculate distance between two points.
     Points can be either coordinates (lat, lon) or location strings.
-    
+
     Args:
         point1: First point (coordinates or location string)
         point2: Second point (coordinates or location string)
-        
+
     Returns:
         Distance in miles
     """
@@ -53,11 +58,11 @@ def get_distance(point1: Union[Tuple[float, float], str], point2: Union[Tuple[fl
 def get_bucket(value: float, buckets: Dict[int, str]) -> str:
     """
     Get the appropriate bucket for a numeric value.
-    
+
     Args:
         value: Numeric value to categorize
         buckets: Dictionary mapping thresholds to bucket names
-        
+
     Returns:
         Bucket name
     """
@@ -182,3 +187,153 @@ def find_nearest_cities(coordinates: Tuple[float, float], limit: int = 3) -> Lis
     except Exception as e:
         logger.error(f"Error finding nearest cities: {str(e)}")
         return []
+
+
+def analyze_location_amenities(location: Union[str, Tuple[float, float]],
+                               max_distance: int = 60) -> Dict[str, Any]:
+    """
+    Comprehensive analysis of location amenities and services.
+
+    Args:
+        location: Location string or coordinates
+        max_distance: Maximum distance to consider (in miles)
+
+    Returns:
+        Dictionary containing detailed location analysis
+    """
+    try:
+        # Get coordinates if location is a string
+        if isinstance(location, str):
+            coordinates = get_location_coordinates(location)
+            if not coordinates:
+                logger.error(f"Could not geocode location: {location}")
+                return {}
+        else:
+            coordinates = location
+
+        analysis = {}
+
+        # Find and analyze nearby cities
+        nearby_cities = find_nearest_cities(coordinates)
+        if not nearby_cities:
+            return {}
+
+        # Medical Analysis
+        hospitals = []
+        for city in nearby_cities:
+            city_info = MAJOR_CITIES[city["city"]]
+            if "Hospital" in city_info.get("amenities", []):
+                hospitals.append({
+                    "name": f"{city['city']} Hospital",
+                    "distance": city["distance"],
+                    "distance_bucket": city["distance_bucket"]
+                })
+        if hospitals:
+            closest_hospital = min(hospitals, key=lambda x: x["distance"])
+            analysis.update({
+                "hospital_distance": f"{closest_hospital['distance']:.1f}",
+                "closest_hospital": closest_hospital["name"],
+                "hospital_distance_bucket": closest_hospital["distance_bucket"]
+            })
+
+        # School Analysis
+        schools = []
+        for city in nearby_cities:
+            city_info = MAJOR_CITIES[city["city"]]
+            if "school_rating" in city_info:
+                schools.append({
+                    "district": city["city"],
+                    "rating": city_info["school_rating"],
+                    "distance": city["distance"]
+                })
+        if schools:
+            best_school = max(schools, key=lambda x: x["rating"])
+            closest_school = min(schools, key=lambda x: x["distance"])
+            analysis.update({
+                "school_district": closest_school["district"],
+                "school_rating": f"{closest_school['rating']}/10",
+                "school_rating_cat": get_bucket(closest_school["rating"], SCHOOL_RATING_BUCKETS),
+                "best_nearby_district": best_school["district"] if best_school != closest_school else None
+            })
+
+        # Population Center Analysis
+        population_centers = []
+        for city in nearby_cities:
+            city_info = MAJOR_CITIES[city["city"]]
+            population_centers.append({
+                "city": city["city"],
+                "population": city_info["population"],
+                "distance": city["distance"]
+            })
+        if population_centers:
+            largest_city = max(population_centers,
+                               key=lambda x: x["population"])
+            analysis.update({
+                "nearest_population_center": largest_city["city"],
+                "town_population": str(largest_city["population"]),
+                "town_pop_bucket": get_bucket(largest_city["population"], POPULATION_BUCKETS)
+            })
+
+        # Amenities Analysis
+        amenities = []
+        cultural_venues = []
+        for city in nearby_cities[:3]:  # Look at 3 closest cities
+            city_info = MAJOR_CITIES[city["city"]]
+            amenities.extend(city_info.get("amenities", []))
+            # Look for cultural amenities
+            cultural = [a for a in city_info.get("amenities", [])
+                        if any(word in a for word in ["Art", "Museum", "Theater", "University"])]
+            if cultural:
+                cultural_venues.append({
+                    "city": city["city"],
+                    "distance": city["distance"],
+                    "venues": cultural
+                })
+
+        # Add amenities analysis
+        if amenities:
+            analysis["other_amenities"] = " | ".join(
+                set(amenities[:5]))  # Top 5 unique amenities
+        if cultural_venues:
+            # Closest cultural venue
+            analysis["cultural_venues"] = cultural_venues[0]
+
+        return analysis
+
+    except Exception as e:
+        logger.error(f"Error in location analysis: {str(e)}")
+        return {}
+
+
+def get_comprehensive_location_info(location: str) -> Dict[str, Any]:
+    """
+    Get comprehensive information about a location.
+
+    Args:
+        location: Location string (e.g., "Portland, ME")
+
+    Returns:
+        Dictionary containing all location-related information
+    """
+    try:
+        # Get coordinates
+        coords = get_location_coordinates(location)
+        if not coords:
+            return {}
+
+        # Get base analysis
+        info = analyze_location_amenities(coords)
+
+        # Add distance to Portland (as it's a major reference point)
+        portland_coords = MAJOR_CITIES["Portland, ME"]["coordinates"]
+        portland_distance = get_distance(coords, portland_coords)
+        info.update({
+            "distance_to_portland": f"{portland_distance:.1f}",
+            "portland_distance_bucket": get_bucket(portland_distance, DISTANCE_BUCKETS)
+        })
+
+        return info
+
+    except Exception as e:
+        logger.error(f"Error getting comprehensive location info: {str(e)}")
+        return {}

@@ -7,7 +7,21 @@ from .base import BaseExtractor
 from ..utils.text import clean_price, clean_html_text, get_range_bucket
 from ..utils.dates import extract_listing_date
 from ..utils.geocoding import get_location_coordinates, get_distance, get_bucket
-from ..config.constants import PRICE_BUCKETS, ACREAGE_BUCKETS, DISTANCE_BUCKETS
+from ..config.constants import (
+    PRICE_BUCKETS, 
+    ACREAGE_BUCKETS, 
+    DISTANCE_BUCKETS,
+    POPULATION_BUCKETS,
+    SCHOOL_RATING_BUCKETS,
+    MAJOR_CITIES
+)
+
+from ..utils.geocoding import (
+    get_location_coordinates,
+    get_distance,
+    get_bucket,
+    find_nearest_cities
+)
 
 logger = logging.getLogger(__name__)
 
@@ -219,25 +233,98 @@ class RealtorExtractor(BaseExtractor):
     def extract_additional_data(self):
         """Extract all additional property data."""
         try:
+            # Extract basic property details first
             self._extract_property_details()
 
-            # Calculate distance to Portland if we have a valid location
+            # Get clean location before geocoding
             location = self.data.get("location")
             if location and location != "Location Unknown":
-                coords = get_location_coordinates(location)
-                if coords:
-                    # Portland, ME coordinates
-                    portland_coords = (43.6591, -70.2568)
-                    distance = get_distance(coords, portland_coords)
-                    self.data.update({
-                        "distance_to_portland": f"{distance:.1f}",
-                        "portland_distance_bucket": get_bucket(distance, DISTANCE_BUCKETS)
-                    })
+                try:
+                    # Get coordinates for the location
+                    coords = get_location_coordinates(location)
+                    if coords:
+                        # Calculate distance to Portland
+                        # Portland, ME coordinates
+                        portland_coords = (43.6591, -70.2568)
+                        distance = get_distance(coords, portland_coords)
+                        self.data.update({
+                            "distance_to_portland": f"{distance:.1f}",
+                            "portland_distance_bucket": get_bucket(distance, DISTANCE_BUCKETS)
+                        })
+
+                        # Find nearest cities and extract information
+                        nearest_cities = find_nearest_cities(coords)
+                        if nearest_cities:
+                            nearest_city = nearest_cities[0]  # Get closest city
+                            city_info = MAJOR_CITIES.get(nearest_city['city'], {})
+
+                            # Extract population data
+                            if 'population' in city_info:
+                                self.data.update({
+                                    "town_population": str(city_info['population']),
+                                    "town_pop_bucket": get_bucket(city_info['population'], POPULATION_BUCKETS)
+                                })
+
+                            # Extract school rating
+                            if 'school_rating' in city_info:
+                                rating = city_info['school_rating']
+                                self.data.update({
+                                    "school_rating": f"{rating}/10",
+                                    "school_rating_cat": get_bucket(rating, SCHOOL_RATING_BUCKETS)
+                                })
+
+                            # Find nearest hospital
+                            for city in nearest_cities:
+                                city_info = MAJOR_CITIES.get(city['city'], {})
+                                if 'Hospital' in city_info.get('amenities', []):
+                                    self.data.update({
+                                        "hospital_distance": f"{city['distance']:.1f}",
+                                        "hospital_distance_bucket": city['distance_bucket'],
+                                        "closest_hospital": f"{city['city']} Hospital"
+                                    })
+                                    break
+
+                            # Extract amenities
+                            amenities = []
+                            restaurants = 0
+                            grocery_stores = 0
+
+                            # Look for amenities in page content
+                            amenities_section = self.soup.find(
+                                attrs=REALTOR_SELECTORS["details"]["features"])
+                            if amenities_section:
+                                for item in amenities_section.find_all(["li", "div"]):
+                                    text = clean_html_text(item.text).lower()
+                                    if "restaurant" in text or "dining" in text:
+                                        restaurants += 1
+                                    elif "grocery" in text or "supermarket" in text:
+                                        grocery_stores += 1
+                                    else:
+                                        amenities.append(text)
+
+                            # Add city amenities
+                            amenities.extend(city_info.get('amenities', []))
+
+                            self.data.update({
+                                # Limit to top 5
+                                "other_amenities": " | ".join(amenities[:5]),
+                                "restaurants_nearby": str(restaurants),
+                                "grocery_stores_nearby": str(grocery_stores)
+                            })
+
+                except Exception as e:
+                    logger.warning(
+                        f"Error calculating location-based data: {str(e)}")
 
             # Extract listing date
             listing_date = extract_listing_date(self.soup, self.platform_name)
             if listing_date:
                 self.data["listing_date"] = listing_date
+
+            # Clean up any duplicates in house details
+            if "house_details" in self.data:
+                self.data["house_details"] = self._clean_house_details(
+                    self.data["house_details"])
 
         except Exception as e:
             logger.error(f"Error in additional data extraction: {str(e)}")

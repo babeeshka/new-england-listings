@@ -17,7 +17,7 @@ class BaseExtractor(ABC):
         self.soup = None
         self.data = {}
 
-        # Define required fields for Notion database
+        # Required fields for Notion database
         self.required_fields = {
             "url": url,
             "platform": self.platform_name,

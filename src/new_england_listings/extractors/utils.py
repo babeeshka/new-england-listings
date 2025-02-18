@@ -7,37 +7,36 @@ from .base import BaseExtractor
 from .realtor import RealtorExtractor
 from .landandfarm import LandAndFarmExtractor
 from .farmland import FarmlandExtractor
+from .landsearch import LandSearchExtractor
+from .farmlink import FarmLinkExtractor
 import logging
 
 logger = logging.getLogger(__name__)
 
-
 def get_extractor_for_url(url: str) -> Optional[Type[BaseExtractor]]:
-    """
-    Get the appropriate extractor class for a given URL.
-    
-    Args:
-        url: The listing URL
-        
-    Returns:
-        Extractor class appropriate for the URL, or None if no match
-    """
+    """Get the appropriate extractor class for a given URL."""
     domain = urlparse(url).netloc.lower()
+    path = urlparse(url).path.lower()
 
-    # Map domains to extractors
-    EXTRACTORS = {
-        "realtor.com": RealtorExtractor,
-        "landandfarm.com": LandAndFarmExtractor,
-        "mainefarmlandtrust.org": FarmlandExtractor,
-        "newenglandfarmlandfinder.org": FarmlandExtractor
-    }
-
-    # Find the matching extractor
-    for domain_pattern, extractor_class in EXTRACTORS.items():
-        if domain_pattern in domain:
-            logger.info(
-                f"Using {extractor_class.__name__} for domain: {domain}")
-            return extractor_class
+    # More specific URL patterns take precedence
+    if "farmlink.mainefarmlandtrust.org" in domain:
+        logger.info("Using FarmLinkExtractor for FarmLink listing")
+        return FarmLinkExtractor
+    elif "mainefarmlandtrust.org" in domain:
+        logger.info("Using FarmlandExtractor for MFT listing")
+        return FarmlandExtractor
+    elif "landsearch.com" in domain:
+        logger.info("Using LandSearchExtractor for LandSearch listing")
+        return LandSearchExtractor
+    elif "landandfarm.com" in domain:
+        logger.info("Using LandAndFarmExtractor for Land and Farm listing")
+        return LandAndFarmExtractor
+    elif "realtor.com" in domain:
+        logger.info("Using RealtorExtractor for Realtor.com listing")
+        return RealtorExtractor
+    elif "newenglandfarmlandfinder.org" in domain:
+        logger.info("Using FarmlandExtractor for NEFF listing")
+        return FarmlandExtractor
 
     logger.warning(f"No matching extractor found for domain: {domain}")
     return None

@@ -7,6 +7,7 @@ from .base import BaseExtractor
 from ..utils.text import clean_price, extract_acreage, clean_html_text, extract_property_type
 from ..utils.dates import extract_listing_date
 from ..utils.geocoding import parse_location_from_url
+from ..utils.geocoding import get_comprehensive_location_info
 from ..config.constants import ACREAGE_BUCKETS
 
 logger = logging.getLogger(__name__)
@@ -19,22 +20,48 @@ class FarmlandExtractor(BaseExtractor):
         """Verify that the page content was properly loaded."""
         logger.debug("Verifying page content...")
 
+        # Debug the raw HTML
+        logger.debug("Raw HTML content:")
+        logger.debug(self.soup.prettify()[:1000])  # First 1000 chars
+
+        # Debug all div classes
+        logger.debug("Found div classes:")
+        for div in self.soup.find_all('div', class_=True):
+            logger.debug(f"- {div.get('class')}")
+
+        # Debug all h1 elements
+        logger.debug("Found h1 elements:")
+        for h1 in self.soup.find_all('h1'):
+            logger.debug(f"- {h1.get('class')} : {h1.text.strip()[:100]}")
+
         # Check for key sections
         sections = [
             ("Main content", self.soup.find("div", class_="field-group--columns")),
             ("Page title", self.soup.find("h1", class_="page-title")),
             ("Property info", self.soup.find(
-                string=lambda x: x and "Total number of acres" in str(x)))
+                string=lambda x: x and "Total number of acres" in str(x))),
+            ("Alternate content", self.soup.find("article")),
+            ("Basic content", self.soup.find("div", class_="content")),
+            ("Farm title", self.soup.find("h1", class_="farmland__title")),
+            # Add more general selectors
+            ("Any h1", self.soup.find("h1")),
+            ("Main div", self.soup.find("div", id="main")),
+            ("Content div", self.soup.find(
+                "div", class_=lambda x: x and "content" in x.lower())),
         ]
 
+        found_sections = []
         for section_name, section in sections:
-            logger.debug(f"{section_name} found: {section is not None}")
+            if section:
+                logger.debug(f"Found {section_name}: {section.get_text()[:100]}")
+                found_sections.append(section_name)
 
-        # Print sample of found content
-        if sections[0][1]:
-            logger.debug(f"Sample content: {sections[0][1].get_text()[:200]}")
+        if not found_sections:
+            logger.error("No valid content sections found")
+            return False
 
-        return any(section for _, section in sections)
+        logger.info(f"Found content sections: {', '.join(found_sections)}")
+        return True
 
     def extract(self, soup: BeautifulSoup) -> Dict[str, Any]:
         """Main extraction method with content verification."""
@@ -184,15 +211,30 @@ class FarmlandExtractor(BaseExtractor):
 
     def extract_additional_data(self):
         """Extract comprehensive property details."""
+        # Keep all your existing code in this method
         super().extract_additional_data()
 
         if "newenglandfarmlandfinder.org" in self.url:
             try:
+                # Keep all your existing extraction code...
                 self._extract_basic_details()
                 self._extract_acreage_details()
                 self._extract_farm_details()
                 self._extract_property_features()
                 self._extract_dates()
+
+                # Add this new section at the end of the method
+                # Get location-based information
+                if self.data.get("location") != "Location Unknown":
+                    try:
+                        location_info = get_comprehensive_location_info(
+                            self.data["location"])
+                        # Only update fields that aren't already set
+                        for key, value in location_info.items():
+                            if key not in self.data or self.data[key] is None:
+                                self.data[key] = value
+                    except Exception as e:
+                        logger.warning(f"Error getting location info: {str(e)}")
 
             except Exception as e:
                 logger.error(f"Error in additional data extraction: {str(e)}")
