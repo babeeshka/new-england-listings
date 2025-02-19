@@ -115,41 +115,91 @@ def parse_location_from_url(url: str) -> Optional[str]:
     return None
 
 
+def get_county_coordinates(county: str, state: str = "ME") -> Optional[Tuple[float, float]]:
+    """Get coordinates for a county center."""
+    geolocator = Nominatim(user_agent="new_england_listings", timeout=10)
+
+    try:
+        # Try different query formats
+        queries = [
+            f"{county} County, {state}, USA",
+            f"{county} County, {state}",
+            f"{county}, {state}, United States"
+        ]
+
+        for query in queries:
+            try:
+                logger.debug(f"Trying to geocode county with query: {query}")
+                geocode_result = geolocator.geocode(
+                    query,
+                    exactly_one=True,
+                    country_codes=["us"],
+                    featuretype=["county", "administrative"]
+                )
+                if geocode_result:
+                    coords = (geocode_result.latitude,
+                              geocode_result.longitude)
+                    logger.debug(f"Found county coordinates: {coords}")
+                    return coords
+            except GeocoderTimedOut:
+                logger.warning(f"Timeout for query: {query}")
+                continue
+
+    except Exception as e:
+        logger.error(f"Error geocoding county {county}, {state}: {str(e)}")
+
+    return None
+
+
 @lru_cache(maxsize=1000)
 def get_location_coordinates(location: str) -> Optional[Tuple[float, float]]:
     """Get coordinates for a location using geocoding."""
     if not location or location == "Location Unknown":
         return None
 
-    geolocator = Nominatim(user_agent="new_england_listings")
+    geolocator = Nominatim(user_agent="new_england_listings", timeout=10)
     logger.debug(f"Geocoding location: {location}")
 
     try:
+        # Check if this is a county location
+        county_match = re.match(r'(\w+)\s+County,\s*(\w{2})', location)
+        if county_match:
+            county, state = county_match.groups()
+            coords = get_county_coordinates(county, state)
+            if coords:
+                return coords
+
         # Clean up the location string
         location = re.sub(r'\s+', ' ', location).strip()
 
         # If we already have a state code, try that first
         if re.search(r',\s*[A-Z]{2}\b', location):
             try:
-                geocode_result = geolocator.geocode(location, exactly_one=True)
+                geocode_result = geolocator.geocode(
+                    location,
+                    exactly_one=True,
+                    country_codes=["us"]
+                )
                 if geocode_result:
                     coords = (geocode_result.latitude,
                               geocode_result.longitude)
                     logger.debug(f"Found coordinates: {coords}")
                     return coords
             except GeocoderTimedOut:
-                pass
+                logger.warning(f"Timeout for location: {location}")
 
         # Try with different state contexts
         states = ["ME", "NH", "VT", "MA", "CT", "RI"]
-        # Remove existing state if present
         base_location = re.sub(r',\s*[A-Z]{2}.*$', '', location)
 
         for state in states:
             try:
                 location_with_state = f"{base_location}, {state}"
                 geocode_result = geolocator.geocode(
-                    location_with_state, exactly_one=True)
+                    location_with_state,
+                    exactly_one=True,
+                    country_codes=["us"]
+                )
                 if geocode_result:
                     coords = (geocode_result.latitude,
                               geocode_result.longitude)
@@ -157,6 +207,8 @@ def get_location_coordinates(location: str) -> Optional[Tuple[float, float]]:
                         f"Found coordinates with state {state}: {coords}")
                     return coords
             except GeocoderTimedOut:
+                logger.warning(
+                    f"Timeout for location with state: {location_with_state}")
                 continue
 
     except Exception as e:
