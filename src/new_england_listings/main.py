@@ -6,24 +6,25 @@ from .extractors.landandfarm import LandAndFarmExtractor
 from .extractors.realtor import RealtorExtractor
 from .extractors.farmland import FarmlandExtractor
 from .extractors.farmlink import FarmLinkExtractor
+from .extractors.landsearch import LandSearchExtractor
 from .utils.browser import get_page_content
 from .utils.notion.client import create_notion_entry  # Fixed import path
 
 logger = logging.getLogger(__name__)
 
 
-# In main.py
 def get_extractor(url: str):
     """Get the appropriate extractor for the URL."""
     domain = urlparse(url).netloc.lower()
 
     logger.debug(f"Getting extractor for domain: {domain}")
 
-    # Check for FarmLink first
-    if "farmlink.mainefarmlandtrust.org" in domain:
-        return FarmLinkExtractor(url)
+    if "landsearch.com" in domain:
+        return LandSearchExtractor(url)
     elif "landandfarm.com" in domain:
         return LandAndFarmExtractor(url)
+    elif "farmlink.mainefarmlandtrust.org" in domain:
+        return FarmLinkExtractor(url)
     elif "realtor.com" in domain:
         return RealtorExtractor(url)
     elif any(x in domain for x in ["mainefarmlandtrust.org", "newenglandfarmlandfinder.org"]):
@@ -38,6 +39,7 @@ def needs_selenium(url: str) -> bool:
         "realtor.com",
         "newenglandfarmlandfinder.org",
         "landsearch.com",
+        "landandfarm.com",
         "zillow.com",
         "farmlink.mainefarmlandtrust.org"
     ]

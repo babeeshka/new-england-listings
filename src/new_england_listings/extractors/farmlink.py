@@ -146,15 +146,10 @@ class FarmLinkExtractor(BaseExtractor):
         return "Location Unknown"
 
     def extract_price(self) -> Tuple[str, str]:
-        """Extract price information."""
+        """Extract price information from property description."""
         logger.debug("Extracting price...")
 
-        # First try getting direct price field
-        price_value = self._find_field_value(FARMLINK_SELECTORS["labels"]["price"])
-        if price_value:
-            return clean_price(price_value)
-
-        # Try finding in description with more specific patterns
+        # Find the property description container
         desc = self.soup.find(
             **FARMLINK_SELECTORS["property_description"]["container"])
         if desc:
@@ -162,18 +157,78 @@ class FarmLinkExtractor(BaseExtractor):
                 **FARMLINK_SELECTORS["property_description"]["content"])
             if content:
                 text = content.get_text()
+
+                # Store all found prices
+                prices = []
+
+                # Look for specific price patterns
                 price_patterns = [
-                    r'(?:asking|listing|sale)\s+price(?:\s+is)?\s*(?:of)?\s*\$?([\d,.]+)',
-                    r'priced\s+at\s*\$?([\d,.]+)',
-                    r'(\$[\d,.]+)(?:\s+(?:for|asking|price))',
-                    r'property\s+is\s+(?:listed\s+)?(?:for|at)\s*\$?([\d,.]+)'
+                    # Combined property pattern
+                    r'(?:house\s+and\s+business\s+together|property\s+and\s+business)\s*-?\s*(?:priced\s+at)?\s*\$?([\d,]+)',
+                    # House only pattern
+                    r'house\s+only\s*-?\s*(?:priced\s+at)?\s*\$?([\d,]+)',
+                    # Business only pattern
+                    r'business\s+only\s*-?\s*(?:priced\s+at)?\s*\$?([\d,]+)',
+                    # General price patterns
+                    r'priced\s+at\s*\$?([\d,]+)',
+                    r'price(?:d)?:?\s*\$?([\d,]+)',
+                    r'asking\s*\$?([\d,]+)',
+                    r'\$\s*([\d,]+)(?:\s+(?:for|asking|price))?'
                 ]
 
                 for pattern in price_patterns:
-                    match = re.search(pattern, text, re.I)
-                    if match:
-                        price_str = match.group(1).replace('$', '').strip()
-                        return clean_price(price_str)
+                    matches = re.finditer(pattern, text, re.I)
+                    for match in matches:
+                        try:
+                            price_str = match.group(1).replace(',', '')
+                            price_val = float(price_str)
+                            if 100000 <= price_val <= 10000000:  # Reasonable range for farm properties
+                                logger.debug(f"Found price: ${price_val:,.2f}")
+                                prices.append(price_val)
+                        except (ValueError, IndexError) as e:
+                            logger.debug(f"Error parsing price: {e}")
+                            continue
+
+                if prices:
+                    # Get the highest price if multiple are found
+                    # This assumes the combined property price would be highest
+                    highest_price = max(prices)
+                    price_str = f"${highest_price:,.0f}"
+
+                    # Set price bucket based on the highest price
+                    if highest_price < 300000:
+                        bucket = "Under $300K"
+                    elif highest_price < 600000:
+                        bucket = "$300K - $600K"
+                    elif highest_price < 900000:
+                        bucket = "$600K - $900K"
+                    elif highest_price < 1200000:
+                        bucket = "$900K - $1.2M"
+                    elif highest_price < 1500000:
+                        bucket = "$1.2M - $1.5M"
+                    elif highest_price < 2000000:
+                        bucket = "$1.5M - $2M"
+                    else:
+                        bucket = "$2M+"
+
+                    # Add note about multiple prices if found
+                    if len(prices) > 1:
+                        price_details = []
+                        if re.search(r'business\s+only.*?\$[\d,]+', text, re.I):
+                            price_details.append(
+                                f"Business Only: ${min(prices):,.0f}")
+                        if re.search(r'house\s+only.*?\$[\d,]+', text, re.I):
+                            # Find the middle price if there are 3 prices
+                            house_price = sorted(prices)[1] if len(
+                                prices) == 3 else min(prices)
+                            price_details.append(
+                                f"House Only: ${house_price:,.0f}")
+
+                        if price_details:
+                            self.data["notes"] = f"Multiple pricing options available: {', '.join(price_details)}. " + (
+                                self.data.get("notes", "") or "")
+
+                    return price_str, bucket
 
         return "Contact for Price", "N/A"
 

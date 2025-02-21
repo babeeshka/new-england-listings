@@ -27,95 +27,121 @@ def generate_windows_properties():
         "mobile": False
     }
 
-# src/new_england_listings/utils/browser.py
-# (previous imports remain the same)
-
+def generate_mouse_tracks(start_x, start_y, end_x, end_y, points=10):
+    """Generate natural-looking mouse movement tracks."""
+    points = []
+    for i in range(points):
+        # Use bezier curve to create natural movement
+        t = i / (points - 1)
+        x = start_x + (end_x - start_x) * t + random.randint(-10, 10)
+        y = start_y + (end_y - start_y) * t + random.randint(-10, 10)
+        points.append((int(x), int(y)))
+    return points
 
 def get_stealth_driver() -> webdriver.Chrome:
-    """Get a ChromeDriver instance configured for maximum stealth."""
+    """Get a ChromeDriver instance with enhanced stealth for LandAndFarm."""
     options = Options()
 
     # Basic settings
     options.add_argument('--headless=new')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
+
+    # Additional stealth settings
     options.add_argument('--disable-blink-features=AutomationControlled')
+    options.add_argument("--disable-notifications")
+    options.add_argument("--ignore-certificate-errors")
+    options.add_argument("--allow-running-insecure-content")
+    options.add_argument("--start-maximized")
+    options.add_argument("--disable-gpu")
 
-    # Random window size
-    window_props = generate_windows_properties()
-    options.add_argument(
-        f'--window-size={window_props["width"]},{window_props["height"]}')
+    # Enhanced headers
+    options.add_argument("--disable-features=IsolateOrigins,site-per-process")
+    options.add_argument("--disable-site-isolation-trials")
 
-    # Enhanced stealth settings
-    options.add_argument('--disable-infobars')
-    options.add_argument('--disable-notifications')
-    options.add_argument('--disable-popup-blocking')
-    options.add_argument('--disable-web-security')
+    # Random viewport size
+    width = random.randint(1200, 1600)
+    height = random.randint(800, 1000)
+    options.add_argument(f"--window-size={width},{height}")
 
-    # Privacy settings
-    options.add_argument('--enable-privacy')
-    options.add_argument('--disable-site-isolation-trials')
-
-    # Random user agent
+    # Random user agent from recent browser list
     user_agents = [
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15"
     ]
     user_agent = random.choice(user_agents)
     options.add_argument(f'user-agent={user_agent}')
 
-    # Additional experimental options
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option('useAutomationExtension', False)
-    options.add_experimental_option('excludeSwitches', ['enable-logging'])
-
-    # Add preferences
+    # Enhanced preferences
     prefs = {
         'profile.default_content_setting_values': {
             'notifications': 2,
-            'geolocation': 2
+            'images': 1,
+            'javascript': 1,
+            'cookies': 1,
+            'plugins': 1,
+            'popups': 2,
+            'geolocation': 2,
+            'auto_select_certificate': 2,
+            'mouselock': 2,
+            'mixed_script': 1,
+            'media_stream': 2,
+            'media_stream_mic': 2,
+            'media_stream_camera': 2,
+            'protocol_handlers': 2,
+            'ppapi_broker': 2,
+            'automatic_downloads': 2,
+            'midi_sysex': 2,
+            'push_messaging': 2,
+            'ssl_cert_decisions': 2,
+            'metro_switch_to_desktop': 2,
+            'protected_media_identifier': 2,
+            'app_banner': 2,
+            'site_engagement': 2,
+            'durable_storage': 2
         },
         'profile.managed_default_content_settings': {
             'images': 1,
             'javascript': 1
-        },
-        'profile.managed_default_content_setting_values': {
-            'plugins': 1
         }
     }
     options.add_experimental_option('prefs', prefs)
+    options.add_experimental_option(
+        'excludeSwitches', ['enable-automation', 'enable-logging'])
+    options.add_experimental_option('useAutomationExtension', False)
 
-    # Create driver
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
+
+    # Set longer timeouts
+    driver.set_page_load_timeout(90)
+    driver.set_script_timeout(90)
 
     # Set CDP commands for additional stealth
     driver.execute_cdp_cmd('Network.setUserAgentOverride', {
         "userAgent": user_agent,
         "platform": "Windows",
-        "acceptLanguage": "en-US,en;q=0.9"
+        "acceptLanguage": "en-US,en;q=0.9",
+        "userAgentMetadata": {
+            "brands": [
+                {"brand": "Google Chrome", "version": "122"},
+                {"brand": "Chromium", "version": "122"}
+            ],
+            "fullVersion": "122.0.0.0",
+            "platform": "Windows",
+            "platformVersion": "10.0.0",
+            "architecture": "x86",
+            "model": "",
+            "mobile": False
+        }
     })
-
-    # Simpler stealth script that won't conflict with Chrome properties
-    stealth_js = """
-    // Overwrite the navigator.webdriver flag
-    Object.defineProperty(navigator, 'webdriver', {
-        get: () => undefined
-    });
-    
-    // Add language preferences
-    Object.defineProperty(navigator, 'languages', {
-        get: () => ['en-US', 'en']
-    });
-    """
-    driver.execute_script(stealth_js)
 
     return driver
 
-
 def get_page_content(url: str, use_selenium: bool = False, max_retries: int = 3, timeout: int = 30) -> BeautifulSoup:
-    """Get page content with enhanced stealth measures."""
+    """Get page content with enhanced stealth and retry logic."""
     logger.info(f"Starting page fetch for {url}")
 
     retry_count = 0
@@ -126,90 +152,56 @@ def get_page_content(url: str, use_selenium: bool = False, max_retries: int = 3,
                 driver = get_stealth_driver()
 
                 try:
-                    # Random initial delay
+                    # Initial delay
                     time.sleep(random.uniform(2, 4))
 
-                    # Set page load timeout
-                    driver.set_page_load_timeout(timeout)
-                    driver.set_script_timeout(timeout)
-
-                    # Load the page
+                    # Navigate with referrer
                     logger.info("Navigating to page...")
+                    driver.execute_cdp_cmd('Network.setExtraHTTPHeaders', {
+                        'headers': {
+                            'Referer': 'https://www.google.com/',
+                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                            'Accept-Language': 'en-US,en;q=0.9',
+                            'Accept-Encoding': 'gzip, deflate, br',
+                            'Connection': 'keep-alive',
+                            'Upgrade-Insecure-Requests': '1',
+                            'Sec-Fetch-Dest': 'document',
+                            'Sec-Fetch-Mode': 'navigate',
+                            'Sec-Fetch-Site': 'cross-site',
+                            'Sec-Fetch-User': '?1',
+                            'DNT': '1'
+                        }
+                    })
+
                     driver.get(url)
+                    # Wait longer after initial load
+                    time.sleep(random.uniform(3, 5))
 
-                    # Initial wait
-                    time.sleep(random.uniform(1, 2))
-
-                    # Simulate human-like scrolling
-                    scroll_height = driver.execute_script(
-                        "return document.body.scrollHeight")
-                    for i in range(3):
-                        scroll_y = random.randint(100, scroll_height // 3)
-                        driver.execute_script(
-                            f"window.scrollBy(0, {scroll_y})")
-                        time.sleep(random.uniform(0.5, 1))
-
-                    # Wait for key elements with extended timeout
-                    logger.info("Waiting for page content...")
-                    wait = WebDriverWait(driver, timeout)
-
-                    # Try multiple selectors for key elements
-                    selectors = [
-                        "[data-testid='property-meta']",
-                        "[data-testid='list-price']",
-                        "[data-testid='address']",
-                        ".property-meta",
-                        ".price",
-                        ".address"
-                    ]
-
-                    found_elements = 0
-                    for selector in selectors:
-                        try:
-                            wait.until(EC.presence_of_element_located(
-                                (By.CSS_SELECTOR, selector)))
-                            found_elements += 1
-                            time.sleep(random.uniform(0.2, 0.5))
-                        except TimeoutException:
-                            continue
-
-                    if found_elements == 0:
-                        logger.warning("No key elements found on page")
+                    # Check if we got a valid page
+                    if "This site can't be reached" in driver.title:
+                        logger.error("Got error page, retrying...")
+                        retry_count += 1
+                        time.sleep(random.uniform(5, 10) * retry_count)
+                        continue
 
                     # Get page source
                     html = driver.page_source
-                    content_length = len(html)
-
-                    # Check for blocking
-                    if "pardon our interruption" in html.lower():
-                        logger.warning("Detected blocking page, retrying...")
-                        retry_count += 1
-                        time.sleep(random.uniform(3, 6) * retry_count)
-                        continue
-
-                    logger.info(
-                        f"Retrieved page content (length: {content_length})")
                     return BeautifulSoup(html, 'html.parser')
 
                 finally:
                     driver.quit()
+
             else:
-                user_agents = [
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                ]
+                # Regular requests with enhanced headers
                 headers = {
-                    'User-Agent': random.choice(user_agents),
+                    'User-Agent': get_random_user_agent(),
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                     'Accept-Language': 'en-US,en;q=0.5',
                     'Accept-Encoding': 'gzip, deflate, br',
                     'Connection': 'keep-alive',
                     'Upgrade-Insecure-Requests': '1',
-                    'Sec-Fetch-Dest': 'document',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-Site': 'none',
-                    'Sec-Fetch-User': '?1',
+                    'Cache-Control': 'max-age=0',
+                    'TE': 'Trailers',
                     'DNT': '1'
                 }
 
@@ -223,10 +215,105 @@ def get_page_content(url: str, use_selenium: bool = False, max_retries: int = 3,
                 f"Attempt {retry_count}/{max_retries} failed: {str(e)}")
             if retry_count == max_retries:
                 raise
-            time.sleep(random.uniform(3, 6) * retry_count)
+            time.sleep(random.uniform(5, 10) * retry_count)
 
     raise Exception(f"Failed to fetch page after {max_retries} attempts")
 
+def wait_for_load(driver: webdriver.Chrome, timeout: int = 90) -> bool:
+    """Wait for page to load with enhanced checks."""
+    logger.debug("Waiting for page load...")
 
-# Create alias for backward compatibility
+    try:
+        # Wait for initial page load
+        WebDriverWait(driver, timeout).until(
+            lambda d: d.execute_script(
+                'return document.readyState') == 'complete'
+        )
+
+        # Random delay
+        time.sleep(random.uniform(2, 4))
+
+        # Check for common elements
+        selectors = [
+            "body",
+            ".property-details",
+            ".listing-details",
+            "#property-info",
+            ".property-meta"
+        ]
+
+        found = False
+        for selector in selectors:
+            try:
+                element = WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                )
+                found = True
+                logger.debug(f"Found element: {selector}")
+                break
+            except TimeoutException:
+                continue
+
+        if not found:
+            logger.warning("No key elements found after page load")
+            return False
+
+        # Additional random delay
+        time.sleep(random.uniform(1, 2))
+
+        # Scroll simulation
+        scroll_height = driver.execute_script(
+            "return document.body.scrollHeight")
+        if scroll_height > 200:
+            viewport_height = driver.execute_script(
+                "return window.innerHeight")
+            scroll_positions = list(
+                range(0, scroll_height, min(500, viewport_height)))
+            random.shuffle(scroll_positions)  # Randomize scroll order
+
+            # Only scroll 3 random positions
+            for position in scroll_positions[:3]:
+                driver.execute_script(f"window.scrollTo(0, {position});")
+                time.sleep(random.uniform(0.5, 1.5))
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Error during page load: {str(e)}")
+        return False
+
+def get_page_with_retry(url: str, max_retries: int = 3) -> Optional[str]:
+    """Get page content with enhanced retry logic."""
+    logger.debug(f"Attempting to fetch {url}")
+
+    delays = [5, 10, 15]  # Progressive delays between retries
+
+    for attempt in range(max_retries):
+        try:
+            driver = get_stealth_driver()
+            logger.debug(f"Attempt {attempt + 1}: Loading page...")
+
+            driver.get(url)
+            if wait_for_load(driver):
+                html = driver.page_source
+                if "captcha" not in html.lower() and "security check" not in html.lower():
+                    logger.debug("Successfully retrieved page content")
+                    return html
+
+            logger.warning(
+                f"Attempt {attempt + 1} failed, waiting before retry")
+            time.sleep(delays[attempt])
+
+        except Exception as e:
+            logger.error(f"Error during attempt {attempt + 1}: {str(e)}")
+            if attempt < max_retries - 1:
+                time.sleep(delays[attempt])
+        finally:
+            try:
+                driver.quit()
+            except:
+                pass
+
+    return None
+
 get_selenium_driver = get_stealth_driver

@@ -9,48 +9,52 @@ from . import __version__
 
 
 def setup_logging(verbose: bool = False):
-    """Configure logging with focused debug output."""
-    # Create formatters
-    detailed_formatter = logging.Formatter(
-        '%(asctime)s - %(levelname)s - %(name)s - %(message)s'
-    )
-    simple_formatter = logging.Formatter(
-        '%(levelname)s - %(message)s'
-    )
-
+    """Configure logging with comprehensive output."""
     # Remove existing handlers
     root = logging.getLogger()
     for handler in root.handlers[:]:
         root.removeHandler(handler)
 
+    # Create formatters
+    detailed_formatter = logging.Formatter(
+        '%(asctime)s - %(levelname)s - %(name)s - %(message)s'
+    )
+
     # Console handler - keep it minimal
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(simple_formatter)
-    console_handler.setLevel(logging.INFO)
-
-    # Debug file handler - focus on extraction process
-    file_handler = logging.FileHandler('extraction_debug.log', mode='w')
-    file_handler.setFormatter(detailed_formatter)
-    file_handler.setLevel(logging.DEBUG)
-
-    # Configure root logger
+    console_handler.setFormatter(detailed_formatter)
+    console_handler.setLevel(logging.INFO if verbose else logging.ERROR)
     root.addHandler(console_handler)
+
+    # File handler - capture everything
+    file_handler = logging.FileHandler(
+        'extraction_debug.log', mode='w', encoding='utf-8')
+    file_handler.setFormatter(detailed_formatter)
+    file_handler.setLevel(logging.DEBUG)  # Set to DEBUG to capture everything
     root.addHandler(file_handler)
-    root.setLevel(logging.DEBUG if verbose else logging.INFO)
 
-    # Silence noisy modules
-    for logger_name in ['urllib3', 'selenium', 'WDM', 'websockets']:
-        logging.getLogger(logger_name).setLevel(logging.WARNING)
+    # Set root logger to DEBUG to allow all messages
+    root.setLevel(logging.DEBUG)
 
-    # Ensure our extractors log at appropriate level
-    extractor_logger = logging.getLogger('new_england_listings.extractors')
-    extractor_logger.setLevel(logging.DEBUG if verbose else logging.INFO)
-
-    # Add specific handler for HTML content
-    html_handler = logging.FileHandler('html_content.log', mode='w')
+    # Create separate HTML content log
+    html_handler = logging.FileHandler(
+        'html_content.log', mode='w', encoding='utf-8')
     html_handler.setFormatter(logging.Formatter('%(message)s'))
     html_handler.addFilter(lambda record: 'HTML Content' in record.msg)
-    extractor_logger.addHandler(html_handler)
+    root.addHandler(html_handler)
+
+    # Set specific logger levels
+    loggers = {
+        'new_england_listings.extractors': logging.DEBUG,
+        'new_england_listings.utils.browser': logging.DEBUG,
+        'new_england_listings.utils.text': logging.DEBUG,
+        'new_england_listings.main': logging.DEBUG,
+        'urllib3': logging.INFO,
+        'selenium': logging.INFO
+    }
+
+    for logger_name, level in loggers.items():
+        logging.getLogger(logger_name).setLevel(level)
 
 def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse command line arguments."""
