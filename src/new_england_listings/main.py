@@ -2,13 +2,15 @@
 from typing import Dict, Any
 from urllib.parse import urlparse
 import logging
+import random
+import time
 from .extractors.landandfarm import LandAndFarmExtractor
 from .extractors.realtor import RealtorExtractor
 from .extractors.farmland import FarmlandExtractor
 from .extractors.farmlink import FarmLinkExtractor
 from .extractors.landsearch import LandSearchExtractor
 from .utils.browser import get_page_content
-from .utils.notion.client import create_notion_entry  # Fixed import path
+from .utils.notion.client import create_notion_entry 
 
 logger = logging.getLogger(__name__)
 
@@ -46,43 +48,62 @@ def needs_selenium(url: str) -> bool:
     return any(domain in url.lower() for domain in selenium_domains)
 
 
-
-def process_listing(url: str, use_notion: bool = True) -> Dict[str, Any]:
-    """Process a single listing URL."""
+async def process_listing(url: str, use_notion: bool = True, max_retries: int = 3) -> Dict[str, Any]:
+    """Process a single listing URL with retries."""
     logger.info(f"Processing listing: {url}")
 
-    try:
-        # Get the appropriate extractor
-        extractor = get_extractor(url)
-        if not extractor:
-            raise ValueError(f"No extractor available for URL: {url}")
+    retry_count = 0
+    while retry_count < max_retries:
+        try:
+            # Get the appropriate extractor
+            extractor = get_extractor(url)
+            if not extractor:
+                raise ValueError(f"No extractor available for URL: {url}")
 
-        logger.info(f"Using extractor: {extractor.__class__.__name__}")
+            logger.info(f"Using extractor: {extractor.__class__.__name__}")
 
-        # Get the page content
-        logger.info("Fetching page content...")
-        use_selenium = needs_selenium(url)
-        if use_selenium:
-            logger.info("Using Selenium for dynamic content")
+            # Get the page content
+            logger.info("Fetching page content...")
+            use_selenium = needs_selenium(url)
+            if use_selenium:
+                logger.info("Using Selenium for dynamic content")
 
-        soup = get_page_content(url, use_selenium=use_selenium)
+            # Add delay between retries
+            if retry_count > 0:
+                delay = (2 ** retry_count) + \
+                    random.uniform(1, 5)  # Exponential backoff
+                logger.info(
+                    f"Retry {retry_count + 1}/{max_retries}, waiting {delay:.1f}s")
+                time.sleep(delay)
 
-        # Extract the data
-        logger.info("Extracting data...")
-        data = extractor.extract(soup)
+            soup = get_page_content(url, use_selenium=use_selenium)
 
-        # Create Notion entry if requested
-        if use_notion:
-            logger.info("Creating Notion entry...")
-            create_notion_entry(data)
-            logger.info("Notion entry created successfully")
+            # Check for blocking content
+            text = soup.get_text().lower()
+            if any(x in text for x in ['captcha', 'pardon our interruption', 'please verify']):
+                raise ValueError("Detected blocking content")
 
-        return data
+            # Extract the data
+            logger.info("Extracting data...")
+            data = extractor.extract(soup)
 
-    except Exception as e:
-        logger.error(f"Error processing listing: {str(e)}", exc_info=True)
-        raise
+            # Create Notion entry if requested
+            if use_notion:
+                logger.info("Creating Notion entry...")
+                create_notion_entry(data)
+                logger.info("Notion entry created successfully")
 
+            return data
+
+        except Exception as e:
+            retry_count += 1
+            if retry_count == max_retries:
+                logger.error(f"Error processing listing: {str(e)}")
+                raise
+            logger.warning(f"Attempt {retry_count} failed: {str(e)}")
+            continue
+
+    raise Exception(f"Failed to process listing after {max_retries} attempts")
 
 if __name__ == "__main__":
     import sys

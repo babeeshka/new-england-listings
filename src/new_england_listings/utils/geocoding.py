@@ -150,7 +150,6 @@ def get_county_coordinates(county: str, state: str = "ME") -> Optional[Tuple[flo
 
     return None
 
-
 @lru_cache(maxsize=1000)
 def get_location_coordinates(location: str) -> Optional[Tuple[float, float]]:
     """Get coordinates for a location using geocoding."""
@@ -215,7 +214,6 @@ def get_location_coordinates(location: str) -> Optional[Tuple[float, float]]:
         logger.error(f"Error geocoding location {location}: {str(e)}")
 
     return None
-
 
 def find_nearest_cities(coordinates: Tuple[float, float], limit: int = 3) -> List[Dict[str, Any]]:
     """Find the nearest major cities and their distances."""
@@ -303,7 +301,9 @@ def analyze_location_amenities(location: Union[str, Tuple[float, float]],
             closest_school = min(schools, key=lambda x: x["distance"])
             analysis.update({
                 "school_district": closest_school["district"],
-                "school_rating": f"{closest_school['rating']}/10",
+                "school_rating": closest_school["rating"],  # Store as a float value
+                # Optional: keep string version in a separate field
+                "school_rating_display": f"{closest_school['rating']}/10",
                 "school_rating_cat": get_bucket(closest_school["rating"], SCHOOL_RATING_BUCKETS),
                 "best_nearby_district": best_school["district"] if best_school != closest_school else None
             })
@@ -358,15 +358,6 @@ def analyze_location_amenities(location: Union[str, Tuple[float, float]],
 
 
 def get_comprehensive_location_info(location: str) -> Dict[str, Any]:
-    """
-    Get comprehensive information about a location.
-
-    Args:
-        location: Location string (e.g., "Portland, ME")
-
-    Returns:
-        Dictionary containing all location-related information
-    """
     try:
         # Get coordinates
         coords = get_location_coordinates(location)
@@ -375,6 +366,17 @@ def get_comprehensive_location_info(location: str) -> Dict[str, Any]:
 
         # Get base analysis
         info = analyze_location_amenities(coords)
+
+        # Ensure school_rating is a float if it exists
+        if "school_rating" in info and isinstance(info["school_rating"], str) and "/" in info["school_rating"]:
+            try:
+                info["school_rating"] = float(
+                    info["school_rating"].split("/")[0])
+            except ValueError:
+                # Handle conversion error - set to None or a default value
+                logger.warning(
+                    f"Could not convert school_rating: {info['school_rating']}")
+                info["school_rating"] = None
 
         # Add distance to Portland (as it's a major reference point)
         portland_coords = MAJOR_CITIES["Portland, ME"]["coordinates"]
@@ -385,7 +387,6 @@ def get_comprehensive_location_info(location: str) -> Dict[str, Any]:
         })
 
         return info
-
     except Exception as e:
         logger.error(f"Error getting comprehensive location info: {str(e)}")
         return {}

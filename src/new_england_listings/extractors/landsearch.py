@@ -1,4 +1,5 @@
 # src/new_england_listings/extractors/landsearch.py
+
 from typing import Dict, Any, Tuple, Optional
 import re
 import logging
@@ -6,7 +7,11 @@ from urllib.parse import urlparse
 from datetime import datetime
 from bs4 import BeautifulSoup
 from .base import BaseExtractor
-from ..utils.text import clean_price, clean_html_text, extract_acreage
+from ..models.base import (
+    PropertyType, PriceBucket, AcreageBucket,
+    DistanceBucket, SchoolRatingCategory, TownPopulationBucket
+)
+from ..utils.text import clean_html_text, extract_acreage, clean_price
 from ..utils.dates import extract_listing_date
 from ..utils.geocoding import get_comprehensive_location_info
 from ..config.constants import ACREAGE_BUCKETS
@@ -42,6 +47,11 @@ LANDSEARCH_SELECTORS = {
 }
 
 
+class LandSearchExtractionError(Exception):
+    """Custom exception for LandSearch extraction errors."""
+    pass
+
+
 class LandSearchExtractor(BaseExtractor):
     """Extractor for LandSearch.com listings."""
 
@@ -69,9 +79,9 @@ class LandSearchExtractor(BaseExtractor):
 
         # Check for essential elements
         essential_elements = [
-            self.soup.find(**LANDSEARCH_SELECTORS["price"]["main"]),
+            self.soup.find(**LANDSEARCH_SELECTORS["price"]["container"]),
             self.soup.find(**LANDSEARCH_SELECTORS["details"]["container"]),
-            self.soup.find(**LANDSEARCH_SELECTORS["location"]["address"])
+            self.soup.find(**LANDSEARCH_SELECTORS["location"]["container"])
         ]
 
         return any(essential_elements)
@@ -164,6 +174,13 @@ class LandSearchExtractor(BaseExtractor):
             location = location_match.group(1).replace('-', ' ').title()
             return f"{location}, ME"
 
+        # Try to extract from title
+        if self.soup.title:
+            title = self.soup.title.string
+            location_match = re.search(r'in\s+([^,]+),\s+(ME|Maine)', title)
+            if location_match:
+                return f"{location_match.group(1)}, {location_match.group(2)}"
+
         return "Location Unknown"
 
     def extract_acreage_info(self) -> Tuple[str, str]:
@@ -200,6 +217,14 @@ class LandSearchExtractor(BaseExtractor):
     def extract_additional_data(self):
         """Extract additional property details."""
         try:
+            # Initialize raw_data
+            self.raw_data = {
+                "details": {},
+                "location": {},
+                "price": {},
+                "history": {}
+            }
+
             # Extract detailed attributes
             attributes_section = self.soup.find(
                 'section', {'class': 'accordion__section', 'data-type': 'attributes'})
@@ -217,36 +242,71 @@ class LandSearchExtractor(BaseExtractor):
                             dt = def_group.find('dt')
                             dd = def_group.find('dd')
                             if dt and dd:
-                                detail = f"{section_name} - {dt.text.strip()}: {dd.text.strip()}"
+                                key = dt.text.strip()
+                                value = dd.text.strip()
+                                detail = f"{section_name} - {key}: {value}"
                                 details.append(detail)
+                                # Store in raw_data as well
+                                self.raw_data["details"][f"{section_name} - {key}"] = value
+                                # Also store in simplified format
+                                self.raw_data["details"][key] = value
 
                 if details:
                     self.data["house_details"] = " | ".join(details)
 
+            # Extract price (already set by extract_price)
+            price_container = self.soup.find(
+                **LANDSEARCH_SELECTORS["price"]["container"])
+            if price_container:
+                self.raw_data["price"]["text"] = price_container.text.strip()
+
+            # Extract location (already set by extract_location)
+            location_container = self.soup.find(
+                **LANDSEARCH_SELECTORS["location"]["container"])
+            if location_container:
+                full_address = location_container.find(
+                    **LANDSEARCH_SELECTORS["location"]["address"])
+                if full_address:
+                    self.raw_data["location"]["full_address"] = clean_html_text(
+                        full_address.text)
+
             # Extract property description for notes
-            description = self.soup.find('div', {'class': 'property-description'})
+            description = self.soup.find(
+                'div', {'class': 'property-description'})
             if description:
                 self.data["notes"] = clean_html_text(description.get_text())
 
-            # Extract property type
-            if attributes_section:
-                type_def = attributes_section.find('dt', string='Type')
-                if type_def and type_def.find_next('dd'):
-                    property_type = type_def.find_next('dd').text.strip()
-                    if property_type in ['Land', 'Farm', 'Agricultural']:
-                        self.data["property_type"] = property_type
+            # Extract property type from raw data
+            if "Type" in self.raw_data["details"]:
+                type_text = self.raw_data["details"]["Type"]
+                if "residential" in type_text.lower():
+                    self.data["property_type"] = "Single Family"
+                elif "farm" in type_text.lower() or "agricultural" in type_text.lower():
+                    self.data["property_type"] = "Farm"
+                elif "land" in type_text.lower() or "lot" in type_text.lower():
+                    self.data["property_type"] = "Land"
+                elif "commercial" in type_text.lower():
+                    self.data["property_type"] = "Commercial"
+                else:
+                    self.data["property_type"] = type_text
+            elif "Subtype" in self.raw_data["details"]:
+                subtype = self.raw_data["details"]["Subtype"]
+                if "single family" in subtype.lower():
+                    self.data["property_type"] = "Single Family"
+                elif "farm" in subtype.lower():
+                    self.data["property_type"] = "Farm"
+                else:
+                    self.data["property_type"] = subtype
 
-            # Check for waterfront/features in lot section
-            lot_section = attributes_section.find(
-                'section', {'class': 'property-info__column'})
-            if lot_section and lot_section.find('h3', string='Lot'):
-                features = lot_section.find('dt', string='Features')
-                if features and features.find_next('dd'):
-                    features_text = features.find_next('dd').text.strip()
-                    self.data["other_amenities"] = features_text
+            # Extract features as amenities
+            features = [v for k, v in self.raw_data["details"].items()
+                        if any(x in k.lower() for x in ["feature", "material", "roof"])]
+            if features:
+                self.data["other_amenities"] = " | ".join(features)
 
             # Process listing history
-            history_section = self.soup.find('section', {'class': 'accordion__section', 'data-type': 'updates'})
+            history_section = self.soup.find(
+                'section', {'class': 'accordion__section', 'data-type': 'updates'})
             if history_section:
                 table = history_section.find('table')
                 if table:
@@ -262,44 +322,55 @@ class LandSearchExtractor(BaseExtractor):
 
                     if history:
                         # Set price history
-                        self.data["price_history"] = " | ".join(history)
-                        
+                        self.raw_data["history"]["events"] = history
+
                         # Extract listing date directly from the table
                         for row in rows:
                             cells = row.find_all('td')
                             if len(cells) >= 2:
                                 event = cells[1].text.strip()
                                 if event == "New listing":
-                                    self.data["listing_date"] = datetime.strptime(
-                                        cells[0].text.strip(), "%b %d, %Y"
-                                    ).strftime("%Y-%m-%d")
-                                    break
-                        
-                        # If no "New listing" found, try "Relisted"
-                        if "listing_date" not in self.data:
-                            for row in rows:
-                                cells = row.find_all('td')
-                                if len(cells) >= 2:
-                                    event = cells[1].text.strip()
-                                    if event == "Relisted":
-                                        self.data["listing_date"] = datetime.strptime(
-                                            cells[0].text.strip(), "%b %d, %Y"
-                                        ).strftime("%Y-%m-%d")
+                                    date_str = cells[0].text.strip()
+                                    try:
+                                        date_obj = datetime.strptime(
+                                            date_str, "%b %d, %Y")
+                                        self.data["listing_date"] = date_obj
                                         break
-                        
-                        # If still no date found, use most recent date
+                                    except Exception as e:
+                                        logger.warning(
+                                            f"Could not parse listing date: {date_str} - {str(e)}")
+
+                        # If no "New listing" found, try first date
                         if "listing_date" not in self.data and rows:
                             first_row_cells = rows[0].find_all('td')
                             if first_row_cells:
-                                self.data["listing_date"] = datetime.strptime(
-                                    first_row_cells[0].text.strip(), "%b %d, %Y"
-                                ).strftime("%Y-%m-%d")
+                                date_str = first_row_cells[0].text.strip()
+                                try:
+                                    date_obj = datetime.strptime(
+                                        date_str, "%b %d, %Y")
+                                    self.data["listing_date"] = date_obj
+                                except Exception as e:
+                                    logger.warning(
+                                        f"Could not parse first date: {date_str} - {str(e)}")
 
             # Get location-based information if location is known
             if self.data.get("location") != "Location Unknown":
-                location_info = get_comprehensive_location_info(
-                    self.data["location"])
-                self.data.update(location_info)
+                try:
+                    location_info = get_comprehensive_location_info(
+                        self.data["location"])
+                    if location_info:
+                        for key, value in location_info.items():
+                            # Handle special case for school_rating (convert "X/10" to float)
+                            if key == "school_rating" and isinstance(value, str) and "/" in value:
+                                try:
+                                    self.data[key] = float(value.split("/")[0])
+                                except ValueError:
+                                    logger.warning(
+                                        f"Could not convert school_rating: {value}")
+                            else:
+                                self.data[key] = value
+                except Exception as e:
+                    logger.error(f"Error getting location info: {str(e)}")
 
         except Exception as e:
             logger.error(f"Error in additional data extraction: {str(e)}")

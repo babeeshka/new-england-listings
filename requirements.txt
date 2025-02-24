@@ -30,3 +30,5 @@ uvicorn==0.34.0
 webdriver-manager>=3.5.2
 websocket-client==1.8.0
 wsproto==1.2.0
+aiohttp>=3.8.0
+asyncio>=3.4.3

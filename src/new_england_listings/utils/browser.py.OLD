@@ -27,7 +27,6 @@ def generate_windows_properties():
         "mobile": False
     }
 
-
 def generate_mouse_tracks(start_x, start_y, end_x, end_y, points=10):
     """Generate natural-looking mouse movement tracks."""
     points = []
@@ -38,7 +37,6 @@ def generate_mouse_tracks(start_x, start_y, end_x, end_y, points=10):
         y = start_y + (end_y - start_y) * t + random.randint(-10, 10)
         points.append((int(x), int(y)))
     return points
-
 
 def get_stealth_driver() -> webdriver.Chrome:
     """Get a ChromeDriver instance with enhanced stealth for LandAndFarm."""
@@ -142,14 +140,11 @@ def get_stealth_driver() -> webdriver.Chrome:
 
     return driver
 
-
 def get_page_content(url: str, use_selenium: bool = False, max_retries: int = 3, timeout: int = 30) -> BeautifulSoup:
     """Get page content with enhanced stealth and retry logic."""
     logger.info(f"Starting page fetch for {url}")
 
     retry_count = 0
-    blocking_detected = False
-
     while retry_count < max_retries:
         try:
             if use_selenium:
@@ -189,35 +184,9 @@ def get_page_content(url: str, use_selenium: bool = False, max_retries: int = 3,
                         time.sleep(random.uniform(5, 10) * retry_count)
                         continue
 
-                    # Check for common blocking messages but don't fail immediately
-                    page_source = driver.page_source.lower()
-                    if any(text in page_source for text in ['captcha', 'security check', 'please verify', 'pardon our interruption']):
-                        logger.warning(
-                            "Detected possible blocking content, but continuing with extraction")
-                        blocking_detected = True
-                        # No return here, we'll continue with what we have
-
                     # Get page source
                     html = driver.page_source
-                    soup = BeautifulSoup(html, 'html.parser')
-
-                    # For Realtor.com, try to extract location from URL even if blocked
-                    if "realtor.com" in url and blocking_detected:
-                        # Add a marker that can be detected by the extractor
-                        meta_tag = soup.new_tag("meta")
-                        meta_tag["name"] = "extraction-status"
-                        meta_tag["content"] = "blocked-but-attempting"
-                        soup.head.append(meta_tag)
-
-                        # Try to extract from URL
-                        parts = url.split('_')
-                        if len(parts) >= 3:
-                            location_meta = soup.new_tag("meta")
-                            location_meta["name"] = "url-extracted-location"
-                            location_meta["content"] = f"{parts[-3].replace('-', ' ').title()}, {parts[-2].upper()}"
-                            soup.head.append(location_meta)
-
-                    return soup
+                    return BeautifulSoup(html, 'html.parser')
 
                 finally:
                     driver.quit()
@@ -249,7 +218,6 @@ def get_page_content(url: str, use_selenium: bool = False, max_retries: int = 3,
             time.sleep(random.uniform(5, 10) * retry_count)
 
     raise Exception(f"Failed to fetch page after {max_retries} attempts")
-
 
 def wait_for_load(driver: webdriver.Chrome, timeout: int = 90) -> bool:
     """Wait for page to load with enhanced checks."""
@@ -314,7 +282,6 @@ def wait_for_load(driver: webdriver.Chrome, timeout: int = 90) -> bool:
         logger.error(f"Error during page load: {str(e)}")
         return False
 
-
 def get_page_with_retry(url: str, max_retries: int = 3) -> Optional[str]:
     """Get page content with enhanced retry logic."""
     logger.debug(f"Attempting to fetch {url}")
@@ -348,17 +315,5 @@ def get_page_with_retry(url: str, max_retries: int = 3) -> Optional[str]:
                 pass
 
     return None
-
-
-def get_random_user_agent() -> str:
-    """Get a random user agent string."""
-    user_agents = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15"
-    ]
-    return random.choice(user_agents)
-
 
 get_selenium_driver = get_stealth_driver

@@ -2,10 +2,14 @@
 from typing import Dict, Any, Tuple, Optional, Union, List
 import re
 import logging
+import random
+import time
+from datetime import datetime
 from bs4 import BeautifulSoup
 from .base import BaseExtractor
+from ..models.base import PropertyType, PriceBucket, AcreageBucket
 from ..utils.text import clean_price, clean_html_text, extract_acreage
-from ..utils.dates import extract_listing_date
+from ..utils.dates import extract_listing_date, parse_date_string
 from ..utils.geocoding import get_comprehensive_location_info
 
 logger = logging.getLogger(__name__)
@@ -40,12 +44,9 @@ class FarmLinkExtractor(BaseExtractor):
 
     def __init__(self, url: str):
         super().__init__(url)
-        self.data = {
-            "platform": "Maine FarmLink",
-            "url": url,
-            "property_type": "Farm"
-        }
-    
+        self.data["platform"] = "Maine FarmLink"
+        self.data["property_type"] = PropertyType.FARM
+
     def _find_field_value(self, label: str) -> Optional[str]:
         """Find value for a given field label."""
         logger.debug(f"Searching for field: {label}")
@@ -143,11 +144,34 @@ class FarmLinkExtractor(BaseExtractor):
                         logger.debug(f"Found county in description: {county}")
                         return f"{county} County, ME"
 
+        # Try extracting from URL
+        farm_id = re.search(r'farm-id-(\d+)', self.url)
+        if farm_id:
+            # Some heuristic mapping of farm IDs to counties if known
+            farm_id_map = {
+                # Example mapping - fill in with known values if available
+                "3741": "Aroostook County, ME",
+                "3742": "Cumberland County, ME"
+            }
+            farm_id_str = farm_id.group(1)
+            if farm_id_str in farm_id_map:
+                return farm_id_map[farm_id_str]
+
         return "Location Unknown"
 
-    def extract_price(self) -> Tuple[str, str]:
+    def extract_price(self) -> Tuple[str, PriceBucket]:
         """Extract price information from property description."""
         logger.debug("Extracting price...")
+
+        # Try getting price directly from field
+        price_value = self._find_field_value(
+            FARMLINK_SELECTORS["labels"]["price"])
+        if price_value:
+            logger.debug(f"Found price in fields: {price_value}")
+            # Extract numeric value from price field
+            price_match = re.search(r'\$?([\d,]+)', price_value)
+            if price_match:
+                return clean_price(price_match.group(1))
 
         # Find the property description container
         desc = self.soup.find(
@@ -197,19 +221,19 @@ class FarmLinkExtractor(BaseExtractor):
 
                     # Set price bucket based on the highest price
                     if highest_price < 300000:
-                        bucket = "Under $300K"
+                        bucket = PriceBucket.UNDER_300K
                     elif highest_price < 600000:
-                        bucket = "$300K - $600K"
+                        bucket = PriceBucket.TO_600K
                     elif highest_price < 900000:
-                        bucket = "$600K - $900K"
+                        bucket = PriceBucket.TO_900K
                     elif highest_price < 1200000:
-                        bucket = "$900K - $1.2M"
+                        bucket = PriceBucket.TO_1_2M
                     elif highest_price < 1500000:
-                        bucket = "$1.2M - $1.5M"
+                        bucket = PriceBucket.TO_1_5M
                     elif highest_price < 2000000:
-                        bucket = "$1.5M - $2M"
+                        bucket = PriceBucket.TO_2M
                     else:
-                        bucket = "$2M+"
+                        bucket = PriceBucket.OVER_2M
 
                     # Add note about multiple prices if found
                     if len(prices) > 1:
@@ -230,19 +254,7 @@ class FarmLinkExtractor(BaseExtractor):
 
                     return price_str, bucket
 
-        return "Contact for Price", "N/A"
-
-    def extract_listing_date(self) -> str:
-        """Extract listing date information."""
-        logger.debug("Extracting listing date...")
-
-        # Try getting direct entry date field
-        entry_date_value = self._find_field_value(FARMLINK_SELECTORS["labels"]["entry_date"])
-        if entry_date_value:
-            return extract_listing_date(entry_date_value)
-
-        # If not found, return a default value
-        return "Unknown"
+        return "Contact for Price", PriceBucket.NA
 
     def extract_listing_name(self) -> str:
         """Extract listing name from URL or page content."""
@@ -259,7 +271,7 @@ class FarmLinkExtractor(BaseExtractor):
 
         return "Untitled Farm Property"
 
-    def extract_acreage_info(self) -> Tuple[str, str]:
+    def extract_acreage_info(self) -> Tuple[str, AcreageBucket]:
         """Extract acreage information and bucket."""
         logger.debug("Extracting acreage...")
 
@@ -292,15 +304,51 @@ class FarmLinkExtractor(BaseExtractor):
                         logger.debug(f"Found acreage in description: {acres}")
                         return extract_acreage(f"{acres} acres")
 
-        return "Not specified", "Unknown"
+        return "Not specified", AcreageBucket.UNKNOWN
+
+    def extract_amenities(self) -> List[str]:
+        """Extract farm amenities from description."""
+        amenities = []
+
+        # Amenity keywords to look for
+        farm_amenities = {
+            "pasture": "Pasture land",
+            "cropland": "Cropland",
+            "forest": "Forested land",
+            "barn": "Barn",
+            "outbuilding": "Outbuildings",
+            "greenhouse": "Greenhouse",
+            "irrigation": "Irrigation system",
+            "well": "Well water",
+            "solar": "Solar power",
+            "equipment": "Farm equipment",
+            "fenced": "Fenced areas",
+            "pond": "Pond",
+            "stream": "Stream or creek",
+            "orchard": "Orchard"
+        }
+
+        # Look in description
+        desc = self.soup.find(
+            **FARMLINK_SELECTORS["property_description"]["container"])
+        if desc:
+            content = desc.find(
+                **FARMLINK_SELECTORS["property_description"]["content"])
+            if content:
+                text = content.get_text().lower()
+
+                # Check for each amenity
+                for keyword, amenity in farm_amenities.items():
+                    if keyword in text:
+                        amenities.append(amenity)
+
+        return amenities
 
     def extract(self, soup: BeautifulSoup) -> Dict[str, Any]:
         """Main extraction method."""
         logger.debug(f"Starting extraction for {self.platform_name}")
         self.soup = soup
-
-        # Initialize data with required fields
-        self.data = self.required_fields.copy()
+        self.raw_data = {}
 
         # Extract basic information
         self.data["listing_name"] = self.extract_listing_name()
@@ -311,10 +359,33 @@ class FarmLinkExtractor(BaseExtractor):
         # Extract additional data
         self.extract_additional_data()
 
+        # Extract amenities
+        amenities = self.extract_amenities()
+        if amenities:
+            self.data["other_amenities"] = " | ".join(amenities)
+
         # If we have a valid location, get comprehensive location info
         if self.data["location"] != "Location Unknown":
-            location_info = get_comprehensive_location_info(self.data["location"])
-            self.data.update(location_info)
+            try:
+                location_info = get_comprehensive_location_info(
+                    self.data["location"])
+                if location_info:
+                    # Process location info
+                    for key, value in location_info.items():
+                        # Handle special case for school_rating (convert "X/10" to float)
+                        if key == "school_rating" and isinstance(value, str) and "/" in value:
+                            try:
+                                self.data[key] = float(value.split("/")[0])
+                            except ValueError:
+                                logger.warning(
+                                    f"Could not convert school_rating: {value}")
+                        else:
+                            self.data[key] = value
+            except Exception as e:
+                logger.error(f"Error getting location info: {str(e)}")
+
+        # Store raw data for debugging
+        self.data["raw_data"] = self.raw_data
 
         return self.data
 
@@ -334,14 +405,37 @@ class FarmLinkExtractor(BaseExtractor):
                 content = desc.find(
                     **FARMLINK_SELECTORS["property_description"]["content"])
                 if content:
-                    self.data["notes"] = clean_html_text(
-                        content.get_text())[:500] + "..."
+                    full_text = clean_html_text(content.get_text())
+                    # Keep full description but limit for preview
+                    if len(full_text) > 500:
+                        self.data["notes"] = full_text[:497] + "..."
+                    else:
+                        self.data["notes"] = full_text
 
             # Extract listing date
             entry_date = self._find_field_value(
                 FARMLINK_SELECTORS["labels"]["entry_date"])
             if entry_date:
-                self.data["listing_date"] = entry_date
+                try:
+                    date_str = parse_date_string(entry_date)
+                    if date_str:
+                        self.data["listing_date"] = datetime.strptime(
+                            date_str, '%Y-%m-%d')
+                except Exception as e:
+                    logger.warning(f"Error parsing listing date: {str(e)}")
+
+            # Extract property type if different from default "Farm"
+            property_type = self._find_field_value(
+                FARMLINK_SELECTORS["labels"]["property_type"])
+            if property_type:
+                if "farmland" in property_type.lower():
+                    self.data["property_type"] = PropertyType.FARM
+                elif "house" in property_type.lower() or "residential" in property_type.lower():
+                    self.data["property_type"] = PropertyType.SINGLE_FAMILY
+                elif "commercial" in property_type.lower():
+                    self.data["property_type"] = PropertyType.COMMERCIAL
+                elif "land" in property_type.lower():
+                    self.data["property_type"] = PropertyType.LAND
 
         except Exception as e:
             logger.error(f"Error in additional data extraction: {str(e)}")
