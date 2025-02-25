@@ -1,35 +1,49 @@
-# src/new_england_listings/utils/__init__.py
-"""Utility functions for New England Listings."""
+"""
+Utility functions and services for New England Listings.
+"""
 
 import logging
-# Changed from get_selenium_driver
+
+# Browser utilities
 from .browser import get_page_content, get_stealth_driver
-from .dates import extract_listing_date, parse_date_string, is_recent_listing
-from .geocoding import (
-    get_location_coordinates,
-    find_nearest_cities,
-    parse_location_from_url
-)
-from .text import (
-    clean_price,
-    extract_acreage,
-    clean_html_text,
-    extract_property_type
-)
+
+# Service classes
+from .location_service import LocationService, TextProcessingService
+from .text import TextProcessor
+from .dates import DateExtractor
+
+# Rate limiting
+from .rate_limiting import rate_limiter, RateLimitExceeded
+
+# Caching utilities
+from .caching_utils import persistent_cache, memoize
+
+# Create singleton instances of services for convenience
+location_service = LocationService()
+text_processor = TextProcessor()
 
 __all__ = [
+    # Browser utilities
     "get_page_content",
-    "get_stealth_driver",  # Changed from get_selenium_driver
-    "extract_listing_date",
-    "parse_date_string",
-    "is_recent_listing",
-    "get_location_coordinates",
-    "find_nearest_cities",
-    "parse_location_from_url",
-    "clean_price",
-    "extract_acreage",
-    "clean_html_text",
-    "extract_property_type"
+    "get_stealth_driver",
+
+    # Service classes
+    "LocationService",
+    "TextProcessingService",
+    "TextProcessor",
+    "DateExtractor",
+
+    # Service instances
+    "location_service",
+    "text_processor",
+
+    # Rate limiting
+    "rate_limiter",
+    "RateLimitExceeded",
+
+    # Caching
+    "persistent_cache",
+    "memoize"
 ]
 
 logger = logging.getLogger(__name__)

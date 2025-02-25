@@ -1,4 +1,6 @@
-# src/new_england_listings/extractors/landsearch.py
+"""
+LandSearch-specific extractor implementation.
+"""
 
 from typing import Dict, Any, Tuple, Optional
 import re
@@ -6,15 +8,10 @@ import logging
 from urllib.parse import urlparse
 from datetime import datetime
 from bs4 import BeautifulSoup
+
 from .base import BaseExtractor
-from ..models.base import (
-    PropertyType, PriceBucket, AcreageBucket,
-    DistanceBucket, SchoolRatingCategory, TownPopulationBucket
-)
-from ..utils.text import clean_html_text, extract_acreage, clean_price
-from ..utils.dates import extract_listing_date
-from ..utils.geocoding import get_comprehensive_location_info
-from ..config.constants import ACREAGE_BUCKETS
+from ..utils.text import clean_html_text, extract_property_type
+from ..utils.dates import extract_listing_date, parse_date_string
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +44,6 @@ LANDSEARCH_SELECTORS = {
 }
 
 
-class LandSearchExtractionError(Exception):
-    """Custom exception for LandSearch extraction errors."""
-    pass
-
-
 class LandSearchExtractor(BaseExtractor):
     """Extractor for LandSearch.com listings."""
 
@@ -68,13 +60,14 @@ class LandSearchExtractor(BaseExtractor):
 
     def _verify_page_content(self) -> bool:
         """Verify the page content was properly loaded."""
-        logger.debug("Verifying page content...")
+        logger.debug("Verifying LandSearch page content...")
 
         # Debug content
         logger.debug("Found elements:")
         for section, selectors in LANDSEARCH_SELECTORS.items():
             for name, selector in selectors.items():
-                elem = self.soup.find(**selector)
+                elem = self.soup.find(
+                    **selector if isinstance(selector, dict) else {'class_': selector})
                 logger.debug(f"{section}.{name}: {elem is not None}")
 
         # Check for essential elements
@@ -92,8 +85,7 @@ class LandSearchExtractor(BaseExtractor):
         title_container = self.soup.find(
             **LANDSEARCH_SELECTORS["title"]["container"])
         if title_container:
-            heading = title_container.find(
-                **LANDSEARCH_SELECTORS["title"]["heading"])
+            heading = title_container.find('h1') or title_container.find('h2')
             if heading:
                 return clean_html_text(heading.text)
 
@@ -121,10 +113,10 @@ class LandSearchExtractor(BaseExtractor):
             price_elem = price_container.find(
                 **LANDSEARCH_SELECTORS["price"]["amount"])
             if price_elem:
-                return clean_price(price_elem.text)
+                return self.text_processor.standardize_price(price_elem.text)
             # Fallback to container text
             if '$' in price_container.text:
-                return clean_price(price_container.text)
+                return self.text_processor.standardize_price(price_container.text)
 
         # Try searching in full text for price patterns
         text = self.soup.get_text()
@@ -138,7 +130,9 @@ class LandSearchExtractor(BaseExtractor):
         for pattern in price_patterns:
             match = re.search(pattern, text, re.I)
             if match:
-                return clean_price(match.group(1))
+                price_text = f"${match.group(1)}" if not match.group(
+                    1).startswith('$') else match.group(1)
+                return self.text_processor.standardize_price(price_text)
 
         return "Contact for Price", "N/A"
 
@@ -169,42 +163,23 @@ class LandSearchExtractor(BaseExtractor):
 
         # Try to extract from URL
         path = urlparse(self.url).path
-        location_match = re.search(r'/([^/]+)-(?:me|maine)-\d+', path, re.I)
-        if location_match:
-            location = location_match.group(1).replace('-', ' ').title()
-            return f"{location}, ME"
+        for state in ['me', 'nh', 'vt', 'ma', 'ct', 'ri']:
+            location_match = re.search(f'/([^/]+)-({state})-\\d+', path, re.I)
+            if location_match:
+                location = location_match.group(1).replace('-', ' ').title()
+                state_code = location_match.group(2).upper()
+                return f"{location}, {state_code}"
 
         # Try to extract from title
         if self.soup.title:
             title = self.soup.title.string
-            location_match = re.search(r'in\s+([^,]+),\s+(ME|Maine)', title)
-            if location_match:
-                return f"{location_match.group(1)}, {location_match.group(2)}"
+            for state_code in ['ME', 'NH', 'VT', 'MA', 'CT', 'RI']:
+                location_match = re.search(
+                    f'in\\s+([^,]+),\\s+({state_code}|{state_code.lower()})', title, re.I)
+                if location_match:
+                    return f"{location_match.group(1)}, {state_code}"
 
         return "Location Unknown"
-
-    def _process_location_info(self, location_info: Dict[str, Any]):
-        """Process location information with LandSearch specific logic."""
-        # Call the base implementation first
-        super()._process_location_info(location_info)
-
-        try:
-            # LandSearch specific processing
-            # Handle recreation information
-            if 'recreation_areas_nearby' in location_info:
-                self.data["recreation_areas_nearby"] = location_info["recreation_areas_nearby"]
-
-            # Process hunting/fishing data
-            if 'hunting_zone' in location_info:
-                self.data["hunting_zone"] = location_info["hunting_zone"]
-
-            # Add specific zoning information
-            if 'zoning_details' in location_info:
-                self.data["zoning_details"] = location_info["zoning_details"]
-
-        except Exception as e:
-            logger.error(
-                f"Error processing LandSearch-specific location info: {str(e)}")
 
     def extract_acreage_info(self) -> Tuple[str, str]:
         """Extract acreage information."""
@@ -214,7 +189,7 @@ class LandSearchExtractor(BaseExtractor):
             acres_match = re.search(
                 r'(\d+(?:\.\d+)?)\s*Acres?', title_text, re.I)
             if acres_match:
-                return extract_acreage(f"{acres_match.group(1)} acres")
+                return self.text_processor.standardize_acreage(f"{acres_match.group(1)} acres")
 
         # Look for acreage in property details
         details = self.soup.find(
@@ -224,7 +199,7 @@ class LandSearchExtractor(BaseExtractor):
             acreage_elem = details.find(
                 **LANDSEARCH_SELECTORS["details"]["acreage"])
             if acreage_elem:
-                return extract_acreage(acreage_elem.text)
+                return self.text_processor.standardize_acreage(acreage_elem.text)
 
             # Search in all detail sections
             for section in details.find_all(**LANDSEARCH_SELECTORS["details"]["section"]):
@@ -233,20 +208,34 @@ class LandSearchExtractor(BaseExtractor):
                     acres_match = re.search(
                         r'(\d+(?:\.\d+)?)\s*acres?', text, re.I)
                     if acres_match:
-                        return extract_acreage(f"{acres_match.group(1)} acres")
+                        return self.text_processor.standardize_acreage(f"{acres_match.group(1)} acres")
+
+        # Try looking for acreage in the full text
+        full_text = self.soup.get_text()
+        acreage_patterns = [
+            r'(\d+(?:\.\d+)?)\s*acres?',
+            r'property\s*size[:\s]*(\d+(?:\.\d+)?)\s*acres?',
+            r'lot\s*size[:\s]*(\d+(?:\.\d+)?)\s*acres?',
+            r'parcel\s*size[:\s]*(\d+(?:\.\d+)?)\s*acres?'
+        ]
+
+        for pattern in acreage_patterns:
+            acres_match = re.search(pattern, full_text, re.I)
+            if acres_match:
+                return self.text_processor.standardize_acreage(f"{acres_match.group(1)} acres")
 
         return "Not specified", "Unknown"
 
     def extract_additional_data(self):
         """Extract additional property details."""
         try:
-            # Initialize raw_data
-            self.raw_data = {
+            # Initialize raw_data structure
+            self.raw_data.update({
                 "details": {},
                 "location": {},
                 "price": {},
                 "history": {}
-            }
+            })
 
             # Extract detailed attributes
             attributes_section = self.soup.find(
@@ -366,24 +355,54 @@ class LandSearchExtractor(BaseExtractor):
                                     logger.warning(
                                         f"Could not parse first date: {date_str} - {str(e)}")
 
-            # Get location-based information if location is known
-            if self.data.get("location") != "Location Unknown":
-                try:
-                    location_info = get_comprehensive_location_info(
-                        self.data["location"])
-                    if location_info:
-                        for key, value in location_info.items():
-                            # Handle special case for school_rating (convert "X/10" to float)
-                            if key == "school_rating" and isinstance(value, str) and "/" in value:
-                                try:
-                                    self.data[key] = float(value.split("/")[0])
-                                except ValueError:
-                                    logger.warning(
-                                        f"Could not convert school_rating: {value}")
-                            else:
-                                self.data[key] = value
-                except Exception as e:
-                    logger.error(f"Error getting location info: {str(e)}")
-
         except Exception as e:
             logger.error(f"Error in additional data extraction: {str(e)}")
+            self.raw_data['additional_data_extraction_error'] = str(e)
+
+    def _extract_house_details(self) -> Optional[str]:
+        """
+        Extract house-specific details for LandSearch.
+        
+        Returns:
+            Optional string of house details
+        """
+        details = []
+
+        # Check for room counts in raw data
+        if "Room Count" in self.raw_data.get("details", {}):
+            details.append(
+                f"Room Count: {self.raw_data['details']['Room Count']}")
+
+        if "Rooms" in self.raw_data.get("details", {}):
+            details.append(f"Rooms: {self.raw_data['details']['Rooms']}")
+
+        # Look for bedroom and bathroom counts
+        rooms_text = self.raw_data.get("details", {}).get("Rooms", "")
+        if rooms_text:
+            bedroom_match = re.search(r'Bedroom\s*x\s*(\d+)', rooms_text)
+            if bedroom_match:
+                details.append(f"{bedroom_match.group(1)} bedrooms")
+
+            bathroom_match = re.search(r'Bathroom\s*x\s*(\d+)', rooms_text)
+            if bathroom_match:
+                details.append(f"{bathroom_match.group(1)} bathrooms")
+
+        # Add structural details
+        if "Structure - Materials" in self.raw_data.get("details", {}):
+            details.append(
+                f"Materials: {self.raw_data['details']['Structure - Materials']}")
+
+        if "Structure - Roof" in self.raw_data.get("details", {}):
+            details.append(
+                f"Roof: {self.raw_data['details']['Structure - Roof']}")
+
+        if "Structure - Heating" in self.raw_data.get("details", {}):
+            details.append(
+                f"Heating: {self.raw_data['details']['Structure - Heating']}")
+
+        # If we have details, return them joined
+        if details:
+            return " | ".join(details)
+
+        # Otherwise fall back to the parent implementation
+        return super()._extract_house_details()

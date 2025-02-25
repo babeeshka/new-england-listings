@@ -1,19 +1,19 @@
-# src/new_england_listings/extractors/farmland.py
+"""
+Maine Farmland Trust and New England Farmland Finder extractor implementation.
+"""
 
 from typing import Dict, Any, Tuple, Optional, List
 import re
 import logging
+import traceback
 from datetime import datetime
 from bs4 import BeautifulSoup, Tag
+
 from .base import BaseExtractor
-from ..models.base import (
-    PropertyType, PriceBucket, AcreageBucket,
-    DistanceBucket, SchoolRatingCategory, TownPopulationBucket
-)
-from ..utils.text import clean_html_text, extract_acreage, clean_price, extract_property_type
-from ..utils.dates import extract_listing_date
-from ..utils.geocoding import get_comprehensive_location_info, parse_location_from_url
-from ..config.constants import ACREAGE_BUCKETS
+from ..utils.text import TextProcessor
+from ..utils.dates import DateExtractor
+from ..utils.location_service import LocationService
+from ..models.base import PropertyType
 
 logger = logging.getLogger(__name__)
 
@@ -57,11 +57,6 @@ FARMLAND_SELECTORS = {
 }
 
 
-class FarmlandExtractionError(Exception):
-    """Custom exception for Farmland extraction errors."""
-    pass
-
-
 class FarmlandExtractor(BaseExtractor):
     """Enhanced extractor for Maine Farmland Trust and New England Farmland Finder."""
 
@@ -79,10 +74,10 @@ class FarmlandExtractor(BaseExtractor):
         super().__init__(url)
 
         # Default type for farmland sites
-        self.data["property_type"] = PropertyType.FARM
+        self.data["property_type"] = "Farm"
 
         # Store URL data for fallbacks
-        self.url_data = {}
+        self.url_data = self._extract_from_url()
 
     @property
     def platform_name(self) -> str:
@@ -189,13 +184,13 @@ class FarmlandExtractor(BaseExtractor):
         if acreage_match:
             data['acreage'] = f"{acreage_match.group(1)} acres"
             acreage_value = float(acreage_match.group(1))
-            # Set acreage bucket based on thresholds
-            for threshold, bucket in sorted(ACREAGE_BUCKETS.items()):
-                if acreage_value < threshold:
-                    data['acreage_bucket'] = bucket
-                    break
-            if 'acreage_bucket' not in data:
-                data['acreage_bucket'] = "Extensive (100+ acres)"
+            # Set acreage bucket
+            data['acreage_bucket'] = self.location_service.get_bucket(
+                acreage_value,
+                {1: "Tiny (Under 1 acre)", 5: "Small (1-5 acres)", 20: "Medium (5-20 acres)",
+                 50: "Large (20-50 acres)", 100: "Very Large (50-100 acres)",
+                 float('inf'): "Extensive (100+ acres)"}
+            )
 
         # Try to extract location
         location_indicators = ['in', 'at', 'near']
@@ -225,7 +220,7 @@ class FarmlandExtractor(BaseExtractor):
 
         # Try to extract property type
         if 'farmland' in self.url.lower():
-            data['property_type'] = PropertyType.FARM
+            data['property_type'] = "Farm"
 
         # Try to extract listing name
         if len(url_parts) > 2:
@@ -241,33 +236,6 @@ class FarmlandExtractor(BaseExtractor):
 
         return data
 
-    def extract(self, soup: BeautifulSoup) -> Dict[str, Any]:
-        """Main extraction method with content verification."""
-        self.soup = soup
-
-        # Verify page content before proceeding
-        if not self._verify_page_content():
-            logger.error("Failed to get complete page content")
-            return self.data
-
-        # Pre-extract URL-based data for fallbacks
-        self.url_data = self._extract_from_url()
-        logger.debug(f"URL-based fallback data: {self.url_data}")
-
-        # Extract core data directly
-        self.data["listing_name"] = self.extract_listing_name()
-        self.data["location"] = self.extract_location()
-        self.data["price"], self.data["price_bucket"] = self.extract_price()
-        self.data["acreage"], self.data["acreage_bucket"] = self.extract_acreage_info()
-
-        # Extract additional platform-specific data
-        self.extract_additional_data()
-
-        # Store raw data for debugging
-        self.raw_data["url_extracted"] = self.url_data
-
-        return self.data
-
     def extract_listing_name(self) -> str:
         """Extract the listing name/title with enhanced error handling."""
         logger.debug("Extracting listing name...")
@@ -276,7 +244,7 @@ class FarmlandExtractor(BaseExtractor):
             # Method 1: First check for farmland__title class
             title_elem = self.soup.find("h1", class_="farmland__title")
             if title_elem:
-                title_text = clean_html_text(title_elem.text)
+                title_text = TextProcessor.clean_html_text(title_elem.text)
                 property_title = title_text  # Store for potential fallback
 
                 # Try to match the farm name pattern
@@ -292,7 +260,7 @@ class FarmlandExtractor(BaseExtractor):
             if additional_info:
                 info_text = additional_info.find_next("div")
                 if info_text:
-                    text = clean_html_text(info_text.text)
+                    text = TextProcessor.clean_html_text(info_text.text)
                     sentences = text.split('.')
                     for sentence in sentences[:2]:  # Check first two sentences
                         if "Farm" in sentence:
@@ -315,7 +283,7 @@ class FarmlandExtractor(BaseExtractor):
             # Try finding h1 with any class
             h1_elem = self.soup.find("h1")
             if h1_elem:
-                title_text = clean_html_text(h1_elem.text)
+                title_text = TextProcessor.clean_html_text(h1_elem.text)
                 logger.debug(f"Found title from h1: {title_text}")
                 return title_text
 
@@ -328,12 +296,12 @@ class FarmlandExtractor(BaseExtractor):
         # Try selectors from FARMLAND_SELECTORS
         title_elem = self._find_with_selector("title", "main")
         if title_elem:
-            return clean_html_text(title_elem.text)
+            return TextProcessor.clean_html_text(title_elem.text)
 
         # Try fallback selector
         title_elem = self._find_with_selector("title", "fallback")
         if title_elem:
-            return clean_html_text(title_elem.text)
+            return TextProcessor.clean_html_text(title_elem.text)
 
         # Try URL fallback
         if 'listing_name' in self.url_data:
@@ -353,7 +321,8 @@ class FarmlandExtractor(BaseExtractor):
                 if location_label:
                     location_value = location_label.find_next("div")
                     if location_value:
-                        location = clean_html_text(location_value.text)
+                        location = TextProcessor.clean_html_text(
+                            location_value.text)
                         logger.debug(f"Found location: {location}")
                         if location and any(s in location.upper() for s in ['ME', 'VT', 'NH', 'MA', 'CT', 'RI']):
                             return location
@@ -383,7 +352,8 @@ class FarmlandExtractor(BaseExtractor):
                 location_container = self.soup.find(class_=class_name)
                 if location_container:
                     # Try to extract location text
-                    location = clean_html_text(location_container.text)
+                    location = TextProcessor.clean_html_text(
+                        location_container.text)
                     if location and self._validate_location(location):
                         return location
 
@@ -391,7 +361,7 @@ class FarmlandExtractor(BaseExtractor):
             for class_name in ["county-name", "property-county"]:
                 county_elem = self.soup.find(class_=class_name)
                 if county_elem:
-                    county = clean_html_text(county_elem.text)
+                    county = TextProcessor.clean_html_text(county_elem.text)
                     if self._validate_county(county):
                         return f"{county} County, ME"
 
@@ -400,7 +370,8 @@ class FarmlandExtractor(BaseExtractor):
                 return self.url_data['location']
 
         # Last resort: try to parse location from URL
-        location_from_url = parse_location_from_url(self.url)
+        location_from_url = self.location_service.parse_location_from_url(
+            self.url)
         if location_from_url:
             return location_from_url
 
@@ -445,7 +416,7 @@ class FarmlandExtractor(BaseExtractor):
                         if price_value:
                             price_text = price_value.text.strip()
                             logger.debug(f"Found price: {price_text}")
-                            return clean_price(price_text)
+                            return self.text_processor.standardize_price(price_text)
 
                 # Check for lease information
                 lease_elem = self.soup.find(
@@ -458,7 +429,7 @@ class FarmlandExtractor(BaseExtractor):
                 logger.warning(f"Error extracting price: {str(e)}")
 
         else:
-            # Try using the new selectors from FARMLAND_SELECTORS
+            # Try using the selectors from FARMLAND_SELECTORS
             try:
                 # First look for price tags
                 for class_name in ["property-price", "pricing-info", "price-section"]:
@@ -469,14 +440,14 @@ class FarmlandExtractor(BaseExtractor):
                             price_elem = price_container.find(
                                 class_=amount_class)
                             if price_elem:
-                                return clean_price(price_elem.text)
+                                return self.text_processor.standardize_price(price_elem.text)
 
                         # Try text patterns
                         text = price_container.get_text()
                         for pattern in FARMLAND_SELECTORS["price"]["text_patterns"]:
                             match = re.search(pattern, text, re.I)
                             if match:
-                                return clean_price(match.group(1))
+                                return self.text_processor.standardize_price(match.group(1))
 
                 # Try finding price in any details section
                 for class_name in ["property-details", "field-group--columns", "listing-details"]:
@@ -486,7 +457,7 @@ class FarmlandExtractor(BaseExtractor):
                         for pattern in FARMLAND_SELECTORS["price"]["text_patterns"]:
                             match = re.search(pattern, text, re.I)
                             if match:
-                                return clean_price(match.group(1))
+                                return self.text_processor.standardize_price(match.group(1))
 
                 # Check for lease terms in the page text
                 page_text = self.soup.get_text().lower()
@@ -500,15 +471,15 @@ class FarmlandExtractor(BaseExtractor):
                     for pattern in lease_patterns:
                         match = re.search(pattern, page_text)
                         if match:
-                            return clean_price(match.group(1))
+                            return self.text_processor.standardize_price(match.group(1))
 
                     # If we found lease terms but no price, note it's a lease
-                    return "Lease - Contact for Price", PriceBucket.NA
+                    return "Lease - Contact for Price", "N/A"
 
             except Exception as e:
                 logger.warning(f"Error extracting price: {str(e)}")
 
-        return "Contact for Price", PriceBucket.NA
+        return "Contact for Price", "N/A"
 
     def extract_acreage_info(self) -> Tuple[str, str]:
         """Extract acreage information with improved accuracy."""
@@ -527,7 +498,7 @@ class FarmlandExtractor(BaseExtractor):
                     if total_value:
                         try:
                             total_acres = float(
-                                clean_html_text(total_value.text))
+                                TextProcessor.clean_html_text(total_value.text))
                             acreage_found = True
                         except ValueError:
                             logger.warning(
@@ -549,7 +520,7 @@ class FarmlandExtractor(BaseExtractor):
                             if value_elem:
                                 try:
                                     acres = float(
-                                        clean_html_text(value_elem.text))
+                                        TextProcessor.clean_html_text(value_elem.text))
                                     total_acres += acres
                                     acreage_found = True
                                 except ValueError:
@@ -557,12 +528,7 @@ class FarmlandExtractor(BaseExtractor):
                                         f"Could not convert {field_type} acreage to float")
 
                 if acreage_found:
-                    formatted_acres = f"{total_acres:.1f} acres"
-                    # Determine bucket
-                    for threshold, bucket in sorted(ACREAGE_BUCKETS.items()):
-                        if total_acres < threshold:
-                            return formatted_acres, bucket
-                    return formatted_acres, "Extensive (100+ acres)"
+                    return self.text_processor.standardize_acreage(f"{total_acres:.1f} acres")
 
                 # Try to extract from URL as fallback
                 if 'acreage' in self.url_data:
@@ -576,12 +542,7 @@ class FarmlandExtractor(BaseExtractor):
                         r'(\d+(?:\.\d+)?)\s*acres?', title_text, re.I)
                     if acreage_match:
                         acres = float(acreage_match.group(1))
-                        formatted_acres = f"{acres:.1f} acres"
-                        # Determine bucket
-                        for threshold, bucket in sorted(ACREAGE_BUCKETS.items()):
-                            if acres < threshold:
-                                return formatted_acres, bucket
-                        return formatted_acres, "Extensive (100+ acres)"
+                        return self.text_processor.standardize_acreage(f"{acres:.1f} acres")
 
             except Exception as e:
                 logger.warning(f"Error extracting acreage details: {str(e)}")
@@ -619,14 +580,14 @@ class FarmlandExtractor(BaseExtractor):
                                 value_elem = parent.find_next(
                                     "div") or parent.find_next_sibling() or parent.parent.find_next("div")
                                 if value_elem:
-                                    return extract_acreage(value_elem.text)
+                                    return self.text_processor.standardize_acreage(value_elem.text)
 
                                 # If no dedicated element, try the parent text
                                 parent_text = parent.get_text()
                                 acres_match = re.search(
                                     r'(\d+(?:\.\d+)?)\s*acres?', parent_text, re.I)
                                 if acres_match:
-                                    return extract_acreage(acres_match.group(0))
+                                    return self.text_processor.standardize_acreage(acres_match.group(0))
 
                     # If not found with standard patterns, try a more generic approach
                     acres_pattern = re.compile(
@@ -634,24 +595,24 @@ class FarmlandExtractor(BaseExtractor):
                     for tag in details.find_all(['p', 'div', 'span', 'li']):
                         match = acres_pattern.search(tag.get_text())
                         if match:
-                            return extract_acreage(match.group(0))
+                            return self.text_processor.standardize_acreage(match.group(0))
 
                     # Try heading tags for acreage
                     for heading in self.soup.find_all(['h1', 'h2', 'h3']):
                         match = acres_pattern.search(heading.get_text())
                         if match:
-                            return extract_acreage(match.group(0))
+                            return self.text_processor.standardize_acreage(match.group(0))
 
                 # If we didn't find acreage in the page content, use URL extraction as fallback
                 if acreage_from_url:
-                    return extract_acreage(acreage_from_url)
+                    return self.text_processor.standardize_acreage(acreage_from_url)
 
                 # Try whole page search as a last resort
                 page_text = self.soup.get_text()
                 acres_match = re.search(
                     r'(\d+(?:\.\d+)?)\s*acres?', page_text, re.I)
                 if acres_match:
-                    return extract_acreage(acres_match.group(0))
+                    return self.text_processor.standardize_acreage(acres_match.group(0))
 
             except Exception as e:
                 logger.error(f"Error extracting acreage: {str(e)}")
@@ -660,216 +621,6 @@ class FarmlandExtractor(BaseExtractor):
                     return self.url_data['acreage'], self.url_data.get('acreage_bucket', "Unknown")
 
         return "Not specified", "Unknown"
-
-    def extract_additional_data(self):
-        """Extract comprehensive property details."""
-        # Use super's extract_additional_data first
-        try:
-            super().extract_additional_data()
-        except Exception as e:
-            logger.warning(f"Base additional data extraction error: {str(e)}")
-
-        if self.is_neff:
-            try:
-                logger.debug(
-                    "Extracting additional New England Farmland Finder data...")
-                self._extract_basic_details()
-                self._extract_acreage_details()
-                self._extract_farm_details()
-                self._extract_property_features()
-                self._extract_dates()
-
-                # Get location-based information
-                if self.data.get("location") != "Location Unknown":
-                    try:
-                        location_info = get_comprehensive_location_info(
-                            self.data["location"])
-                        # Only update fields that aren't already set
-                        for key, value in location_info.items():
-                            if key not in self.data or not self.data[key]:
-                                self.data[key] = value
-                    except Exception as e:
-                        logger.warning(
-                            f"Error getting location info: {str(e)}")
-
-            except Exception as e:
-                logger.error(f"Error in additional data extraction: {str(e)}")
-                logger.debug("Exception details:", exc_info=True)
-        else:
-            # Use the newer extraction method for agricultural details
-            try:
-                # Extract agricultural details
-                ag_details = self.extract_agricultural_details()
-                self.raw_data["agricultural_details"] = ag_details
-
-                # Format farm details
-                farm_details = []
-                if ag_details.get("soil_quality"):
-                    farm_details.append(f"Soil: {ag_details['soil_quality']}")
-                if ag_details.get("water_sources"):
-                    farm_details.append(
-                        f"Water: {ag_details['water_sources']}")
-                if ag_details.get("infrastructure"):
-                    farm_details.append(
-                        f"Infrastructure: {ag_details['infrastructure']}")
-
-                if farm_details:
-                    self.data["farm_details"] = " | ".join(farm_details)
-
-                # Process location information
-                if self.data["location"] != "Location Unknown":
-                    try:
-                        location_info = get_comprehensive_location_info(
-                            self.data["location"])
-                        if location_info:
-                            self._process_location_info(location_info)
-                    except Exception as e:
-                        logger.error(
-                            f"Error processing location info: {str(e)}")
-            except Exception as e:
-                logger.error(
-                    f"Error in agricultural data extraction: {str(e)}")
-
-    def _extract_basic_details(self):
-        """Extract basic property details."""
-        self.data["property_type"] = "Farm"
-
-        # Extract owner type
-        owner_elem = self.soup.find(
-            string=lambda x: x and "Property owner" in str(x))
-        if owner_elem:
-            owner_value = owner_elem.find_next("div")
-            if owner_value:
-                self.data["owner_type"] = clean_html_text(owner_value.text)
-
-    def _extract_acreage_details(self):
-        """Extract detailed acreage information."""
-        acreage_fields = {
-            "Total acres": "Total number of acres",
-            "Cropland": "Acres of cropland",
-            "Pasture": "Acres of pasture",
-            "Forest": "Acres of forested land"
-        }
-
-        acreage_details = []
-        for field_name, search_text in acreage_fields.items():
-            field_elem = self.soup.find(
-                string=lambda x: x and search_text in str(x))
-            if field_elem:
-                value_elem = field_elem.find_next("div")
-                if value_elem:
-                    value = clean_html_text(value_elem.text)
-                    try:
-                        acres = float(value)
-                        if field_name == "Total acres":
-                            self.data["acreage"] = f"{acres:.1f} acres"
-                            # Set acreage bucket based on thresholds
-                            for threshold, bucket in sorted(ACREAGE_BUCKETS.items()):
-                                if acres < threshold:
-                                    self.data["acreage_bucket"] = bucket
-                                    break
-                        acreage_details.append(f"{field_name}: {value} acres")
-                    except ValueError:
-                        logger.warning(
-                            f"Could not convert acreage to float: {value}")
-
-        if acreage_details:
-            self.data["acreage_details"] = " | ".join(acreage_details)
-
-    def _extract_farm_details(self):
-        """Extract detailed farm infrastructure and features."""
-        farm_details = []
-
-        # Infrastructure details
-        infra_elem = self.soup.find(
-            string=lambda x: x and "Farm infrastructure details" in str(x))
-        if infra_elem:
-            details = infra_elem.find_next("div")
-            if details:
-                farm_details.append(
-                    f"Infrastructure: {clean_html_text(details.text)}")
-
-        # Water sources
-        water_elem = self.soup.find(
-            string=lambda x: x and "Water sources details" in str(x))
-        if water_elem:
-            water_details = water_elem.find_next("div")
-            if water_details:
-                farm_details.append(
-                    f"Water Sources: {clean_html_text(water_details.text)}")
-
-        # Equipment details
-        equipment_elem = self.soup.find(
-            string=lambda x: x and "Equipment and machinery details" in str(x))
-        if equipment_elem:
-            equipment_details = equipment_elem.find_next("div")
-            if equipment_details:
-                farm_details.append(
-                    f"Equipment: {clean_html_text(equipment_details.text)}")
-
-        # Housing details
-        housing_elem = self.soup.find(
-            string=lambda x: x and "Farmer housing details" in str(x))
-        if housing_elem:
-            housing_details = housing_elem.find_next("div")
-            if housing_details:
-                self.data["house_details"] = clean_html_text(
-                    housing_details.text)
-
-        if farm_details:
-            self.data["farm_details"] = " | ".join(farm_details)
-
-    def _extract_property_features(self):
-        """Extract additional property features and characteristics."""
-        features = []
-
-        # Check for organic certification
-        organic_elem = self.soup.find(
-            string=lambda x: x and "certified organic" in str(x).lower())
-        if organic_elem:
-            organic_value = organic_elem.find_next("div")
-            if organic_value:
-                features.append(
-                    f"Organic Status: {clean_html_text(organic_value.text)}")
-
-        # Check for conservation easement
-        easement_elem = self.soup.find(
-            string=lambda x: x and "Conservation Easement" in str(x))
-        if easement_elem:
-            easement_details = easement_elem.find_next("div")
-            if easement_details:
-                features.append(
-                    f"Conservation Easement: {clean_html_text(easement_details.text)}")
-
-        # Check for forest management plan
-        forest_elem = self.soup.find(
-            string=lambda x: x and "forest management plan" in str(x).lower())
-        if forest_elem:
-            forest_details = forest_elem.find_next("div")
-            if forest_details:
-                features.append(
-                    f"Forest Management: {clean_html_text(forest_details.text)}")
-
-        if features:
-            self.data["property_features"] = " | ".join(features)
-
-    def _extract_dates(self):
-        """Extract listing dates and other temporal information."""
-        # Posted date
-        date_elem = self.soup.find(
-            string=lambda x: x and "Date posted" in str(x))
-        if date_elem:
-            date_value = date_elem.find_next("div")
-            if date_value:
-                self.data["listing_date"] = clean_html_text(date_value.text)
-
-        # Any additional dates (availability, etc.)
-        availability_elem = self.soup.find(
-            string=lambda x: x and "Date available" in str(x))
-        if availability_elem:
-            avail_value = availability_elem.find_next("div")
-            if avail_value:
-                self.data["available_date"] = clean_html_text(avail_value.text)
 
     def extract_agricultural_details(self) -> Dict[str, Any]:
         """Extract detailed agricultural information."""
@@ -888,7 +639,8 @@ class FarmlandExtractor(BaseExtractor):
                     soil_quality_class = " ".join(soil_quality_class)
                 soil_elem = details_container.find(class_=soil_quality_class)
                 if soil_elem:
-                    details["soil_quality"] = clean_html_text(soil_elem.text)
+                    details["soil_quality"] = TextProcessor.clean_html_text(
+                        soil_elem.text)
 
                 # Extract water sources
                 water_patterns = FARMLAND_SELECTORS["amenities"]["water"]["text"]
@@ -904,7 +656,7 @@ class FarmlandExtractor(BaseExtractor):
                         if parent:
                             value_elem = parent.find_next("div")
                             if value_elem:
-                                details["water_sources"] = clean_html_text(
+                                details["water_sources"] = TextProcessor.clean_html_text(
                                     value_elem.text)
                                 break
 
@@ -922,7 +674,7 @@ class FarmlandExtractor(BaseExtractor):
                         if parent:
                             value_elem = parent.find_next("div")
                             if value_elem:
-                                details["infrastructure"] = clean_html_text(
+                                details["infrastructure"] = TextProcessor.clean_html_text(
                                     value_elem.text)
                                 break
 
@@ -931,71 +683,6 @@ class FarmlandExtractor(BaseExtractor):
         except Exception as e:
             logger.error(f"Error extracting agricultural details: {str(e)}")
             return {}
-
-    def _process_location_info(self, location_info: Dict[str, Any]):
-        """Process location information with Farmland specific logic."""
-        # Call the base implementation first
-        super()._process_location_info(location_info)
-
-        try:
-            # Farmland specific processing
-            # Handle soil quality data that might be specific to farmland
-            if 'soil_quality_rating' in location_info:
-                self.data["soil_quality_rating"] = float(
-                    location_info["soil_quality_rating"])
-
-            # Process agricultural zone data
-            if 'agricultural_zone' in location_info:
-                self.data["agricultural_zone"] = location_info["agricultural_zone"]
-
-            # Process water rights data
-            if 'water_rights' in location_info:
-                self.data["water_rights"] = location_info["water_rights"]
-
-        except Exception as e:
-            logger.error(
-                f"Error processing Farmland-specific location info: {str(e)}")
-
-    def _get_distance_bucket(self, distance: float) -> str:
-        """Convert distance to appropriate bucket enum."""
-        if distance <= 10:
-            return DistanceBucket.UNDER_10
-        elif distance <= 20:
-            return DistanceBucket.TO_20
-        elif distance <= 40:
-            return DistanceBucket.TO_40
-        elif distance <= 60:
-            return DistanceBucket.TO_60
-        elif distance <= 80:
-            return DistanceBucket.TO_80
-        else:
-            return DistanceBucket.OVER_80
-
-    def _get_population_bucket(self, population: int) -> str:
-        """Convert population to appropriate bucket enum."""
-        if population < 5000:
-            return TownPopulationBucket.VERY_SMALL
-        elif population < 15000:
-            return TownPopulationBucket.SMALL
-        elif population < 50000:
-            return TownPopulationBucket.MEDIUM
-        elif population < 100000:
-            return TownPopulationBucket.LARGE
-        else:
-            return TownPopulationBucket.VERY_LARGE
-
-    def _get_school_rating_category(self, rating: float) -> str:
-        """Convert school rating to appropriate category enum."""
-        if rating <= 3:
-            return SchoolRatingCategory.POOR
-        elif rating <= 5:
-            return SchoolRatingCategory.BELOW_AVERAGE
-        elif rating <= 7:
-            return SchoolRatingCategory.AVERAGE
-        elif rating <= 9:
-            return SchoolRatingCategory.ABOVE_AVERAGE
-        else:
-            return SchoolRatingCategory.EXCELLENT
 
     def extract_house_details(self) -> Optional[str]:
         """Extract house-specific details if present."""
@@ -1016,7 +703,8 @@ class FarmlandExtractor(BaseExtractor):
                     if parent:
                         value_elem = parent.find_next("div")
                         if value_elem:
-                            text = clean_html_text(value_elem.text)
+                            text = TextProcessor.clean_html_text(
+                                value_elem.text)
 
                             # Extract specific details
                             bed_match = re.search(r'(\d+)\s*bed', text, re.I)
@@ -1064,7 +752,7 @@ class FarmlandExtractor(BaseExtractor):
             if container:
                 # Extract listed amenities
                 for item in container.find_all("li"):
-                    amenity = clean_html_text(item.text)
+                    amenity = TextProcessor.clean_html_text(item.text)
                     if amenity:
                         amenities.add(amenity)
 
@@ -1090,3 +778,344 @@ class FarmlandExtractor(BaseExtractor):
         except Exception as e:
             logger.error(f"Error extracting amenities: {str(e)}")
             return []
+
+    def _extract_basic_details(self):
+        """Extract basic property details."""
+        self.data["property_type"] = "Farm"
+
+        # Extract owner type
+        owner_elem = self.soup.find(
+            string=lambda x: x and "Property owner" in str(x))
+        if owner_elem:
+            owner_value = owner_elem.find_next("div")
+            if owner_value:
+                self.data["owner_type"] = TextProcessor.clean_html_text(
+                    owner_value.text)
+
+    def _extract_acreage_details(self):
+        """Extract detailed acreage information."""
+        acreage_fields = {
+            "Total acres": "Total number of acres",
+            "Cropland": "Acres of cropland",
+            "Pasture": "Acres of pasture",
+            "Forest": "Acres of forested land"
+        }
+
+        acreage_details = []
+        for field_name, search_text in acreage_fields.items():
+            field_elem = self.soup.find(
+                string=lambda x: x and search_text in str(x))
+            if field_elem:
+                value_elem = field_elem.find_next("div")
+                if value_elem:
+                    value = TextProcessor.clean_html_text(value_elem.text)
+                    try:
+                        acres = float(value)
+                        if field_name == "Total acres":
+                            self.data["acreage"] = f"{acres:.1f} acres"
+                            # Set acreage bucket
+                            self.data["acreage_bucket"] = self.location_service.get_bucket(
+                                acres,
+                                {1: "Tiny (Under 1 acre)", 5: "Small (1-5 acres)", 20: "Medium (5-20 acres)",
+                                 50: "Large (20-50 acres)", 100: "Very Large (50-100 acres)",
+                                 float('inf'): "Extensive (100+ acres)"}
+                            )
+                        acreage_details.append(f"{field_name}: {value} acres")
+                    except ValueError:
+                        logger.warning(
+                            f"Could not convert acreage to float: {value}")
+
+        if acreage_details:
+            self.data["acreage_details"] = " | ".join(acreage_details)
+
+    def _extract_farm_details(self):
+        """Extract detailed farm infrastructure and features."""
+        farm_details = []
+
+        # Infrastructure details
+        infra_elem = self.soup.find(
+            string=lambda x: x and "Farm infrastructure details" in str(x))
+        if infra_elem:
+            details = infra_elem.find_next("div")
+            if details:
+                farm_details.append(
+                    f"Infrastructure: {TextProcessor.clean_html_text(details.text)}")
+
+        # Water sources
+        water_elem = self.soup.find(
+            string=lambda x: x and "Water sources details" in str(x))
+        if water_elem:
+            water_details = water_elem.find_next("div")
+            if water_details:
+                farm_details.append(
+                    f"Water Sources: {TextProcessor.clean_html_text(water_details.text)}")
+
+        # Equipment details
+        equipment_elem = self.soup.find(
+            string=lambda x: x and "Equipment and machinery details" in str(x))
+        if equipment_elem:
+            equipment_details = equipment_elem.find_next("div")
+            if equipment_details:
+                farm_details.append(
+                    f"Equipment: {TextProcessor.clean_html_text(equipment_details.text)}")
+
+        # Housing details
+        housing_elem = self.soup.find(
+            string=lambda x: x and "Farmer housing details" in str(x))
+        if housing_elem:
+            housing_details = housing_elem.find_next("div")
+            if housing_details:
+                self.data["house_details"] = TextProcessor.clean_html_text(
+                    housing_details.text)
+
+        if farm_details:
+            self.data["farm_details"] = " | ".join(farm_details)
+
+    def _extract_property_features(self):
+        """Extract additional property features and characteristics."""
+        features = []
+
+        # Check for organic certification
+        organic_elem = self.soup.find(
+            string=lambda x: x and "certified organic" in str(x).lower())
+        if organic_elem:
+            organic_value = organic_elem.find_next("div")
+            if organic_value:
+                features.append(
+                    f"Organic Status: {TextProcessor.clean_html_text(organic_value.text)}")
+
+        # Check for conservation easement
+        easement_elem = self.soup.find(
+            string=lambda x: x and "Conservation Easement" in str(x))
+        if easement_elem:
+            easement_details = easement_elem.find_next("div")
+            if easement_details:
+                features.append(
+                    f"Conservation Easement: {TextProcessor.clean_html_text(easement_details.text)}")
+
+        # Check for forest management plan
+        forest_elem = self.soup.find(
+            string=lambda x: x and "forest management plan" in str(x).lower())
+        if forest_elem:
+            forest_details = forest_elem.find_next("div")
+            if forest_details:
+                features.append(
+                    f"Forest Management: {TextProcessor.clean_html_text(forest_details.text)}")
+
+        if features:
+            self.data["property_features"] = " | ".join(features)
+
+    def _extract_dates(self):
+        """Extract listing dates and other temporal information."""
+        # Posted date
+        date_elem = self.soup.find(
+            string=lambda x: x and "Date posted" in str(x))
+        if date_elem:
+            date_value = date_elem.find_next("div")
+            if date_value:
+                date_str = DateExtractor.parse_date_string(
+                    TextProcessor.clean_html_text(date_value.text)
+                )
+                if date_str:
+                    self.data["listing_date"] = date_str
+
+        # Any additional dates (availability, etc.)
+        availability_elem = self.soup.find(
+            string=lambda x: x and "Date available" in str(x))
+        if availability_elem:
+            avail_value = availability_elem.find_next("div")
+            if avail_value:
+                self.data["available_date"] = TextProcessor.clean_html_text(
+                    avail_value.text)
+
+    def extract_additional_data(self):
+        """Extract all additional property information."""
+        # Use super's extract_additional_data first
+        try:
+            super().extract_additional_data()
+        except Exception as e:
+            logger.warning(f"Base additional data extraction error: {str(e)}")
+
+        if self.is_neff:
+            try:
+                logger.debug(
+                    "Extracting additional New England Farmland Finder data...")
+                self._extract_basic_details()
+                self._extract_acreage_details()
+                self._extract_farm_details()
+                self._extract_property_features()
+                self._extract_dates()
+
+                # Process location information if location is valid
+                if self.data["location"] != "Location Unknown":
+                    try:
+                        location_info = self.location_service.get_comprehensive_location_info(
+                            self.data["location"])
+
+                        # Map location data to schema
+                        for key, value in location_info.items():
+                            # Skip existing values
+                            if key in self.data and self.data[key]:
+                                continue
+
+                            # Map keys to match our schema
+                            if key == 'nearest_city':
+                                self.data['nearest_city'] = value
+                            elif key == 'nearest_city_distance':
+                                self.data['nearest_city_distance'] = value
+                            elif key == 'nearest_city_distance_bucket':
+                                self.data['nearest_city_distance_bucket'] = value
+                            elif key == 'distance_to_portland':
+                                self.data['distance_to_portland'] = value
+                            elif key == 'portland_distance_bucket':
+                                self.data['portland_distance_bucket'] = value
+                            elif key == 'town_population':
+                                self.data['town_population'] = value
+                            elif key == 'town_pop_bucket':
+                                self.data['town_pop_bucket'] = value
+                            elif key == 'school_district':
+                                self.data['school_district'] = value
+                            elif key == 'school_rating':
+                                self.data['school_rating'] = value
+                            elif key == 'school_rating_cat':
+                                self.data['school_rating_cat'] = value
+                            elif key == 'hospital_distance':
+                                self.data['hospital_distance'] = value
+                            elif key == 'hospital_distance_bucket':
+                                self.data['hospital_distance_bucket'] = value
+                            elif key == 'closest_hospital':
+                                self.data['closest_hospital'] = value
+                            else:
+                                # Store other properties directly
+                                self.data[key] = value
+                    except Exception as e:
+                        logger.warning(
+                            f"Error getting location info: {str(e)}")
+
+            except Exception as e:
+                logger.error(f"Error in additional data extraction: {str(e)}")
+                logger.debug("Exception details:", exc_info=True)
+        else:
+            # Use the newer extraction method for agricultural details
+            try:
+                # Extract agricultural details
+                ag_details = self.extract_agricultural_details()
+                self.raw_data["agricultural_details"] = ag_details
+
+                # Format farm details
+                farm_details = []
+                if ag_details.get("soil_quality"):
+                    farm_details.append(f"Soil: {ag_details['soil_quality']}")
+                if ag_details.get("water_sources"):
+                    farm_details.append(
+                        f"Water: {ag_details['water_sources']}")
+                if ag_details.get("infrastructure"):
+                    farm_details.append(
+                        f"Infrastructure: {ag_details['infrastructure']}")
+
+                if farm_details:
+                    self.data["farm_details"] = " | ".join(farm_details)
+
+                # Try to extract house details if not already set
+                if "house_details" not in self.data:
+                    house_details = self.extract_house_details()
+                    if house_details:
+                        self.data["house_details"] = house_details
+
+                # Extract amenities if not already set
+                if "other_amenities" not in self.data:
+                    amenities = self.extract_amenities()
+                    if amenities:
+                        self.data["other_amenities"] = " | ".join(amenities)
+
+                # Process location information
+                if self.data["location"] != "Location Unknown":
+                    try:
+                        location_info = self.location_service.get_comprehensive_location_info(
+                            self.data["location"])
+
+                        # Map location data to schema
+                        for key, value in location_info.items():
+                            # Skip existing values
+                            if key in self.data and self.data[key]:
+                                continue
+
+                            # Map keys to match our schema
+                            if key == 'nearest_city':
+                                self.data['nearest_city'] = value
+                            elif key == 'nearest_city_distance':
+                                self.data['nearest_city_distance'] = value
+                            elif key == 'nearest_city_distance_bucket':
+                                self.data['nearest_city_distance_bucket'] = value
+                            elif key == 'distance_to_portland':
+                                self.data['distance_to_portland'] = value
+                            elif key == 'portland_distance_bucket':
+                                self.data['portland_distance_bucket'] = value
+                            elif key == 'town_population':
+                                self.data['town_population'] = value
+                            elif key == 'town_pop_bucket':
+                                self.data['town_pop_bucket'] = value
+                            elif key == 'school_district':
+                                self.data['school_district'] = value
+                            elif key == 'school_rating':
+                                self.data['school_rating'] = value
+                            elif key == 'school_rating_cat':
+                                self.data['school_rating_cat'] = value
+                            elif key == 'hospital_distance':
+                                self.data['hospital_distance'] = value
+                            elif key == 'hospital_distance_bucket':
+                                self.data['hospital_distance_bucket'] = value
+                            elif key == 'closest_hospital':
+                                self.data['closest_hospital'] = value
+                            else:
+                                # Store other properties directly
+                                self.data[key] = value
+                    except Exception as e:
+                        logger.error(
+                            f"Error processing location info: {str(e)}")
+            except Exception as e:
+                logger.error(
+                    f"Error in agricultural data extraction: {str(e)}")
+
+    def extract(self, soup: BeautifulSoup) -> Dict[str, Any]:
+        """Main extraction method with content verification."""
+        logger.debug(f"Starting extraction for {self.platform_name}")
+        self.soup = soup
+        self.raw_data = {}
+
+        try:
+            # Verify page content before proceeding
+            if not self._verify_page_content():
+                logger.error("Failed to get complete page content")
+                self.raw_data['extraction_status'] = 'failed'
+                self.raw_data['extraction_error'] = "Failed to verify page content"
+                return self.data
+
+            # Pre-extract URL-based data for fallbacks
+            self.url_data = self._extract_from_url()
+            logger.debug(f"URL-based fallback data: {self.url_data}")
+
+            # Extract core data directly
+            self.data["listing_name"] = self.extract_listing_name()
+            self.data["location"] = self.extract_location()
+            self.data["price"], self.data["price_bucket"] = self.extract_price()
+            self.data["acreage"], self.data["acreage_bucket"] = self.extract_acreage_info()
+
+            # Extract additional platform-specific data
+            self.extract_additional_data()
+
+            # Store raw data for debugging
+            self.raw_data["url_extracted"] = self.url_data
+            self.raw_data['extraction_status'] = 'success'
+
+            return self.data
+
+        except Exception as e:
+            logger.error(f"Error in extraction: {str(e)}")
+            logger.error(traceback.format_exc())
+
+            # Mark the extraction as failed but return partial data
+            self.raw_data['extraction_status'] = 'failed'
+            self.raw_data['extraction_error'] = str(e)
+
+            return self.data
