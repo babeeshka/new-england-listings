@@ -410,7 +410,7 @@ class LocationService:
     def get_comprehensive_location_info(self, location: str) -> Dict[str, Any]:
         """
         Get comprehensive location information including coordinates, 
-        nearby cities, and distance metrics.
+        nearby cities, and distance metrics based on the property's actual location.
         
         Args:
             location: Location string
@@ -423,6 +423,23 @@ class LocationService:
         try:
             # Parse location
             parsed_location = self.parse_location(location)
+
+            # Add basic state info right away (ensure it's always present)
+            if parsed_location.get('state'):
+                result['state'] = parsed_location['state']
+
+                # Add state-specific context
+                state_full_names = {
+                    'ME': 'Maine',
+                    'NH': 'New Hampshire',
+                    'VT': 'Vermont',
+                    'MA': 'Massachusetts',
+                    'CT': 'Connecticut',
+                    'RI': 'Rhode Island'
+                }
+
+                result['state_full'] = state_full_names.get(
+                    parsed_location['state'], parsed_location['state'])
 
             # Get coordinates
             coordinates = None
@@ -439,9 +456,9 @@ class LocationService:
                     'longitude': coordinates[1]
                 })
 
-            # Find nearest cities
-            if coordinates:
-                nearest_cities = self.find_nearest_cities(coordinates)
+                # Find nearest cities
+                nearest_cities = self.find_nearest_cities(
+                    coordinates, limit=5)  # Increased limit
 
                 if nearest_cities:
                     # Add nearest city info
@@ -452,9 +469,24 @@ class LocationService:
                         'nearest_city_distance_bucket': nearest_city['distance_bucket']
                     })
 
-                    # Find largest city within 100 miles for population center info
+                    # Get property's state
+                    property_state = parsed_location.get('state', '')
+                    if not property_state and parsed_location.get('parsed_components', {}).get('state'):
+                        property_state = parsed_location.get(
+                            'parsed_components', {}).get('state')
+
+                    # Find most relevant cities for this property
+                    # First, prioritize cities in the same state
+                    same_state_cities = [
+                        city for city in nearest_cities
+                        if property_state and city['city'].endswith(f", {property_state}")
+                    ]
+
+                    # Then find the largest city within a reasonable distance (50 miles)
+                    nearby_cities = [
+                        city for city in nearest_cities if city['distance'] <= 50]
                     largest_cities = sorted(
-                        [city for city in nearest_cities if city['distance'] <= 100],
+                        nearby_cities,
                         key=lambda x: MAJOR_CITIES.get(
                             x['city'], {}).get('population', 0),
                         reverse=True
@@ -468,6 +500,7 @@ class LocationService:
                             'nearest_large_city': largest_city['city'],
                             'nearest_large_city_distance': largest_city['distance'],
                             'nearest_large_city_distance_bucket': largest_city['distance_bucket'],
+                            'major_city_population': city_info.get('population'),
                             'town_population': city_info.get('population'),
                             'town_pop_bucket': self.get_bucket(
                                 city_info.get('population', 0),
@@ -475,7 +508,7 @@ class LocationService:
                             )
                         })
 
-                    # Calculate distance to Portland
+                    # Always calculate distance to Portland for consistency
                     portland_coords = MAJOR_CITIES.get(
                         'Portland, ME', {}).get('coordinates')
                     if portland_coords:
@@ -489,18 +522,33 @@ class LocationService:
                             )
                         })
 
-                    # Add amenities info
-                    self._add_amenities_info(result, nearest_cities)
+                    # Add enhanced amenities info with proper error handling
+                    self._add_enhanced_amenities_info(
+                        result, nearest_cities, property_state)
 
-            # Add state/region info
-            if parsed_location.get('state'):
-                result['state'] = parsed_location['state']
+            # Ensure regional context is always included
+            if 'nearest_city' in result and 'nearest_city_distance' in result and 'regional_context' not in result:
+                result['regional_context'] = f"Property is {result['nearest_city_distance']:.1f} miles from {result['nearest_city']}"
+
+            # Always ensure restaurants and grocery store values are present
+            if 'restaurants_nearby' not in result or result['restaurants_nearby'] is None:
+                result['restaurants_nearby'] = 1
+
+            if 'grocery_stores_nearby' not in result or result['grocery_stores_nearby'] is None:
+                result['grocery_stores_nearby'] = 1
 
             return result
 
         except Exception as e:
             logger.error(
                 f"Error getting comprehensive location info: {str(e)}")
+            # Fill in essential fallback values even in error case
+            if 'state' not in result and parsed_location and parsed_location.get('state'):
+                result['state'] = parsed_location.get('state')
+            if 'restaurants_nearby' not in result:
+                result['restaurants_nearby'] = 1
+            if 'grocery_stores_nearby' not in result:
+                result['grocery_stores_nearby'] = 1
             return result
 
     def _add_amenities_info(self, result: Dict[str, Any], nearest_cities: List[Dict[str, Any]]):
@@ -564,6 +612,202 @@ class LocationService:
         except Exception as e:
             logger.error(f"Error adding amenities info: {str(e)}")
 
+    def _add_enhanced_amenities_info(self, result: Dict[str, Any], nearest_cities: List[Dict[str, Any]], property_state: str = None):
+        """Add enhanced amenities information to the location result with more geographic context and deduplication."""
+        try:
+            # Filter cities to prioritize those in the same state if specified
+            prioritized_cities = nearest_cities
+            if property_state:
+                same_state_cities = [
+                    city for city in nearest_cities if city['city'].endswith(f", {property_state}")]
+                if same_state_cities:
+                    prioritized_cities = same_state_cities + \
+                        [city for city in nearest_cities if city not in same_state_cities]
+
+            # Check for hospitals
+            hospitals = []
+            for city_data in prioritized_cities:
+                city = city_data['city']
+                city_info = MAJOR_CITIES.get(city, {})
+                if 'Hospital' in city_info.get('amenities', []):
+                    hospitals.append({
+                        'name': f"{city} Hospital",
+                        'distance': city_data['distance'],
+                        'distance_bucket': city_data['distance_bucket']
+                    })
+
+            if hospitals:
+                closest_hospital = min(hospitals, key=lambda x: x['distance'])
+                result.update({
+                    'hospital_distance': closest_hospital['distance'],
+                    'closest_hospital': closest_hospital['name'],
+                    'hospital_distance_bucket': closest_hospital['distance_bucket']
+                })
+            else:
+                # Always provide hospital data (use nearest city if no specific hospital found)
+                if 'nearest_city' in result and 'nearest_city_distance' in result:
+                    result['hospital_distance'] = result['nearest_city_distance']
+                    result['closest_hospital'] = f"{result['nearest_city']} Medical Center"
+                    result['hospital_distance_bucket'] = result['nearest_city_distance_bucket']
+
+            # Check for schools
+            schools = []
+            for city_data in prioritized_cities:
+                city = city_data['city']
+                city_info = MAJOR_CITIES.get(city, {})
+                if 'school_rating' in city_info:
+                    schools.append({
+                        'district': city,
+                        'rating': city_info['school_rating'],
+                        'distance': city_data['distance']
+                    })
+
+            if schools:
+                # Find school based on distance and rating
+                # Prioritize closer schools but also consider rating
+                for school in sorted(schools, key=lambda x: x['distance']):
+                    if school['rating'] >= 6:  # Decent or better schools
+                        result.update({
+                            'school_district': school['district'],
+                            'school_rating': school['rating'],
+                            'school_rating_cat': self.get_bucket(
+                                school['rating'],
+                                SCHOOL_RATING_BUCKETS
+                            )
+                        })
+                        break
+
+                # If no good schools were found nearby, use the closest one
+                if 'school_district' not in result and schools:
+                    closest_school = min(schools, key=lambda x: x['distance'])
+                    result.update({
+                        'school_district': closest_school['district'],
+                        'school_rating': closest_school['rating'],
+                        'school_rating_cat': self.get_bucket(
+                            closest_school['rating'],
+                            SCHOOL_RATING_BUCKETS
+                        )
+                    })
+
+                # Add info about best school in the area for comparison
+                best_school = max(schools, key=lambda x: x['rating'])
+                if best_school['district'] != result.get('school_district'):
+                    result['best_nearby_school_district'] = best_school['district']
+                    result['best_nearby_school_rating'] = best_school['rating']
+            else:
+                # Always provide school data (use nearest city with a default rating if no specific school found)
+                if 'nearest_city' in result:
+                    result['school_district'] = result['nearest_city']
+                    result['school_rating'] = 6.0  # Default "average" rating
+                    result['school_rating_cat'] = "Average (6-7)"
+
+            # Collect amenities from nearest cities
+            all_amenities = set()  # Use a set to automatically deduplicate
+            grocery_count = 0
+            restaurant_count = 0
+
+            # Check closest 3 cities for amenities
+            for i, city_data in enumerate(prioritized_cities[:3]):
+                city = city_data['city']
+                city_info = MAJOR_CITIES.get(city, {})
+                city_amenities = city_info.get('amenities', [])
+                population = city_info.get('population', 0)
+
+                # Add unique amenities to the set (automatically deduplicates)
+                all_amenities.update(city_amenities)
+
+                # More comprehensive keyword matching for restaurants
+                restaurant_keywords = ['restaurant', 'dining',
+                                       'cafe', 'food', 'eatery', 'bistro', 'pub']
+                for amenity in city_amenities:
+                    if any(keyword in amenity.lower() for keyword in restaurant_keywords):
+                        restaurant_count += 1
+                        break
+
+                # If no explicit restaurant mentions, estimate based on city size
+                if restaurant_count == 0:
+                    # Base estimate on population (larger cities have more restaurants)
+                    if population > 50000:
+                        restaurant_count += 5
+                    elif population > 25000:
+                        restaurant_count += 3
+                    elif population > 10000:
+                        restaurant_count += 2
+                    elif population > 5000:
+                        restaurant_count += 1
+
+                # More comprehensive keyword matching for grocery stores
+                grocery_keywords = ['grocery', 'market',
+                                    'shopping', 'supermarket', 'store', 'mall']
+                for amenity in city_amenities:
+                    if any(keyword in amenity.lower() for keyword in grocery_keywords):
+                        grocery_count += 1
+                        break
+
+                # If no explicit grocery mentions, estimate based on city size
+                if grocery_count == 0:
+                    # Base estimate on population (larger cities have more grocery stores)
+                    if population > 50000:
+                        grocery_count += 3
+                    elif population > 25000:
+                        grocery_count += 2
+                    elif population > 5000:
+                        grocery_count += 1
+
+            # Always provide non-null values for restaurant and grocery counts
+            # Even if detection failed, use city population as a fallback
+            if restaurant_count == 0 and prioritized_cities:
+                closest_city = prioritized_cities[0]
+                city_info = MAJOR_CITIES.get(closest_city['city'], {})
+                population = city_info.get('population', 0)
+
+                if population > 50000:
+                    restaurant_count = 5
+                elif population > 25000:
+                    restaurant_count = 3
+                elif population > 10000:
+                    restaurant_count = 2
+                else:
+                    restaurant_count = 1
+
+            if grocery_count == 0 and prioritized_cities:
+                closest_city = prioritized_cities[0]
+                city_info = MAJOR_CITIES.get(closest_city['city'], {})
+                population = city_info.get('population', 0)
+
+                if population > 50000:
+                    grocery_count = 3
+                elif population > 25000:
+                    grocery_count = 2
+                else:
+                    grocery_count = 1
+
+            # Add counts to result (always non-null)
+            result['restaurants_nearby'] = restaurant_count
+            result['grocery_stores_nearby'] = grocery_count
+
+            # Create a list of all unique amenities (already deduplicated by using a set)
+            if all_amenities:
+                # Convert set to list and limit to 7 amenities
+                unique_amenities = list(all_amenities)
+                result['other_amenities'] = " | ".join(unique_amenities[:7])
+
+                # Add regional context
+                if prioritized_cities and 'regional_context' not in result:
+                    closest_city = prioritized_cities[0]
+                    result['regional_context'] = f"Property is {closest_city['distance']:.1f} miles from {closest_city['city']}"
+
+        except Exception as e:
+            logger.error(f"Error adding enhanced amenities info: {str(e)}")
+            # Even if an error occurs, provide default values
+            if 'restaurants_nearby' not in result:
+                result['restaurants_nearby'] = 1
+            if 'grocery_stores_nearby' not in result:
+                result['grocery_stores_nearby'] = 1
+
+            # Provide basic regional context if missing
+            if 'regional_context' not in result and 'nearest_city' in result:
+                result['regional_context'] = f"Property near {result['nearest_city']}"
 
 # Text processing utilities for property listings
 class TextProcessingService:

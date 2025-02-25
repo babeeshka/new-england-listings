@@ -26,6 +26,7 @@ __all__ = [
     # Browser utilities
     "get_page_content",
     "get_stealth_driver",
+    "get_page_content_async"
 
     # Service classes
     "LocationService",

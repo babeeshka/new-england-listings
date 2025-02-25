@@ -15,7 +15,7 @@ DATE_PATTERNS = [
     # Month day, year
     (r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})', '%B %d %Y'),
     # Abbreviated month day, year
-    (r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),?\s+(\d{4})', '%b %d %Y'),
+    (r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sept|Sep|Oct|Nov|Dec)\s+(\d{1,2}),?\s+(\d{4})', '%b %d %Y'),
     # MM/DD/YYYY
     (r'(\d{1,2})/(\d{1,2})/(\d{4})', '%m/%d/%Y'),
     # YYYY-MM-DD
@@ -148,7 +148,7 @@ class DateExtractor:
     @staticmethod
     def parse_date_string(date_text: str) -> Optional[str]:
         """
-        Parse a date string using various formats.
+        Parse a date string using various formats with improved fallback.
         
         Args:
             date_text: Raw date string
@@ -161,8 +161,8 @@ class DateExtractor:
 
         # Clean up the date text
         date_text = re.sub(r'^(?:Listed|Posted|Added|Date Listed)(?:\s+on)?:\s+', '',
-                           date_text,
-                           flags=re.I)
+                        date_text,
+                        flags=re.I)
         date_text = date_text.strip()
 
         logger.debug(f"Parsing date text: {date_text}")
@@ -174,7 +174,11 @@ class DateExtractor:
                 try:
                     if date_format.startswith('%B') or date_format.startswith('%b'):
                         # For month name patterns
-                        date_str = ' '.join(match.groups())
+                        month, day, year = match.groups()
+                        # Handle 'Sept' specifically
+                        if month.lower() == 'sept':
+                            month = 'Sep'
+                        date_str = f"{month} {day} {year}"
                     else:
                         # For numeric patterns
                         date_str = match.group(0)
@@ -188,6 +192,11 @@ class DateExtractor:
                         f"Date format {date_format} failed for {date_str}: {str(e)}")
                     continue
 
+        # Try dateutil parser as fallback
+        dateutil_result = DateExtractor.parse_with_dateutil(date_text)
+        if dateutil_result:
+            return dateutil_result
+
         # Last resort: try direct datetime parsing
         try:
             # Try to parse ISO format dates
@@ -195,15 +204,9 @@ class DateExtractor:
                 date_text.replace('Z', '+00:00'))
             return parsed_date.strftime('%Y-%m-%d')
         except (ValueError, AttributeError):
-            try:
-                # Try with dateutil parser as a fallback
-                from dateutil import parser
-                parsed_date = parser.parse(date_text)
-                return parsed_date.strftime('%Y-%m-%d')
-            except (ImportError, ValueError, AttributeError):
-                logger.warning(f"Could not parse date string: {date_text}")
-                return None
-
+            logger.warning(f"Could not parse date string: {date_text}")
+            return None
+    
     @staticmethod
     def is_recent_listing(date_str: str, days: int = 30) -> bool:
         """
@@ -286,7 +289,29 @@ class DateExtractor:
 
         return None
 
+    @staticmethod
+    def parse_with_dateutil(date_text: str) -> Optional[str]:
+        """
+        Try to parse date using dateutil as a fallback.
+        
+        Args:
+            date_text: Raw date string
+            
+        Returns:
+            Formatted date string (YYYY-MM-DD) or None if parsing fails
+        """
+        if not date_text:
+            return None
 
+        try:
+            # Use dateutil parser which handles many formats automatically
+            from dateutil import parser
+            parsed_date = parser.parse(date_text)
+            return parsed_date.strftime('%Y-%m-%d')
+        except (ImportError, ValueError, AttributeError):
+            logger.warning(f"Could not parse date with dateutil: {date_text}")
+            return None
+    
 # For backward compatibility, provide the old function names
 # that reference the new static methods
 

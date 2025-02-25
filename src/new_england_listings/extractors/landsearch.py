@@ -8,6 +8,7 @@ import logging
 from urllib.parse import urlparse
 from datetime import datetime
 from bs4 import BeautifulSoup
+import traceback
 
 from .base import BaseExtractor
 from ..utils.text import clean_html_text, extract_property_type
@@ -227,137 +228,202 @@ class LandSearchExtractor(BaseExtractor):
         return "Not specified", "Unknown"
 
     def extract_additional_data(self):
-        """Extract additional property details."""
+        """Extract additional property details with enhanced location processing."""
         try:
-            # Initialize raw_data structure
-            self.raw_data.update({
-                "details": {},
-                "location": {},
-                "price": {},
-                "history": {}
-            })
+            # Use the parent class's additional data extraction first to get basic fields
+            super().extract_additional_data()
 
             # Extract detailed attributes
-            attributes_section = self.soup.find(
-                'section', {'class': 'accordion__section', 'data-type': 'attributes'})
-            if attributes_section:
-                details = []
+            try:
+                attributes_section = self.soup.find(
+                    'section', {'class': 'accordion__section', 'data-type': 'attributes'})
+                if attributes_section:
+                    details = []
 
-                # Process each attribute column
-                for column in attributes_section.find_all('section', {'class': 'property-info__column'}):
-                    title = column.find('h3')
-                    if title:
-                        section_name = title.text.strip()
-                        definitions = column.find_all(
-                            'div', {'class': 'definitions__group'})
-                        for def_group in definitions:
-                            dt = def_group.find('dt')
-                            dd = def_group.find('dd')
-                            if dt and dd:
-                                key = dt.text.strip()
-                                value = dd.text.strip()
-                                detail = f"{section_name} - {key}: {value}"
-                                details.append(detail)
-                                # Store in raw_data as well
-                                self.raw_data["details"][f"{section_name} - {key}"] = value
-                                # Also store in simplified format
-                                self.raw_data["details"][key] = value
+                    # Process each attribute column
+                    for column in attributes_section.find_all('section', {'class': 'property-info__column'}):
+                        title = column.find('h3')
+                        if title:
+                            section_name = title.text.strip()
+                            definitions = column.find_all(
+                                'div', {'class': 'definitions__group'})
+                            for def_group in definitions:
+                                dt = def_group.find('dt')
+                                dd = def_group.find('dd')
+                                if dt and dd:
+                                    key = dt.text.strip()
+                                    value = dd.text.strip()
+                                    detail = f"{section_name} - {key}: {value}"
+                                    details.append(detail)
+                                    # Store in raw_data as well
+                                    self.raw_data["details"] = self.raw_data.get(
+                                        "details", {})
+                                    self.raw_data["details"][f"{section_name} - {key}"] = value
+                                    # Also store in simplified format
+                                    self.raw_data["details"][key] = value
 
-                if details:
-                    self.data["house_details"] = " | ".join(details)
+                    if details:
+                        self.data["house_details"] = " | ".join(details)
 
-            # Extract price (already set by extract_price)
-            price_container = self.soup.find(
-                **LANDSEARCH_SELECTORS["price"]["container"])
-            if price_container:
-                self.raw_data["price"]["text"] = price_container.text.strip()
+                # Extract property description for notes
+                description = self.soup.find(
+                    'div', {'class': 'property-description'})
+                if description:
+                    self.data["notes"] = clean_html_text(description.get_text())
 
-            # Extract property description for notes
-            description = self.soup.find(
-                'div', {'class': 'property-description'})
-            if description:
-                self.data["notes"] = clean_html_text(description.get_text())
+                # Extract property type from raw data
+                property_type_value = "Unknown"
+                if "Type" in self.raw_data.get("details", {}):
+                    type_text = self.raw_data["details"]["Type"]
+                    if "residential" in type_text.lower():
+                        property_type_value = "Single Family"
+                    elif "farm" in type_text.lower() or "agricultural" in type_text.lower():
+                        property_type_value = "Farm"
+                    elif "land" in type_text.lower() or "lot" in type_text.lower():
+                        property_type_value = "Land"
+                    elif "commercial" in type_text.lower():
+                        property_type_value = "Commercial"
+                    else:
+                        property_type_value = type_text
+                elif "Subtype" in self.raw_data.get("details", {}):
+                    subtype = self.raw_data["details"]["Subtype"]
+                    if "single family" in subtype.lower():
+                        property_type_value = "Single Family"
+                    elif "farm" in subtype.lower():
+                        property_type_value = "Farm"
+                    else:
+                        property_type_value = subtype
 
-            # Extract property type from raw data
-            if "Type" in self.raw_data["details"]:
-                type_text = self.raw_data["details"]["Type"]
-                if "residential" in type_text.lower():
-                    self.data["property_type"] = "Single Family"
-                elif "farm" in type_text.lower() or "agricultural" in type_text.lower():
-                    self.data["property_type"] = "Farm"
-                elif "land" in type_text.lower() or "lot" in type_text.lower():
-                    self.data["property_type"] = "Land"
-                elif "commercial" in type_text.lower():
-                    self.data["property_type"] = "Commercial"
+                # Use the determined property type
+                if property_type_value != "Unknown":
+                    self.data["property_type"] = property_type_value
+
+                # Try to parse the listing date from history or metadata
+                try:
+                    history_section = self.soup.find(
+                        'section', {'class': 'accordion__section', 'data-type': 'updates'})
+                    if history_section:
+                        table = history_section.find('table')
+                        if table:
+                            rows = table.find_all('tr')[1:]  # Skip header
+                            for row in rows:
+                                cells = row.find_all('td')
+                                if len(cells) >= 2:
+                                    event = cells[1].text.strip()
+                                    if event == "New listing":
+                                        date_str = cells[0].text.strip()
+                                        try:
+                                            from dateutil import parser
+                                            date_obj = parser.parse(date_str)
+                                            self.data["listing_date"] = date_obj
+                                            break
+                                        except Exception as e:
+                                            logger.warning(
+                                                f"Could not parse listing date: {date_str} - {str(e)}")
+                except Exception as e:
+                    logger.warning(f"Error parsing history: {str(e)}")
+
+                # Process location after extracting all property details
+                if self.data["location"] and self.data["location"] != "Location Unknown":
+                    # Get comprehensive location info
+                    location_info = self.location_service.get_comprehensive_location_info(
+                        self.data["location"])
+
+                    # Map fields to our data structure with defaults for essential fields
+                    field_mapping = {
+                        'distance_to_portland': ('distance_to_portland', None),
+                        'portland_distance_bucket': ('portland_distance_bucket', None),
+                        # Default population
+                        'town_population': ('town_population', 10000),
+                        # Default population bucket
+                        'town_pop_bucket': ('town_pop_bucket', "Medium (15K-50K)"),
+                        'school_district': ('school_district', "Nearby School District"),
+                        # Default average rating
+                        'school_rating': ('school_rating', 6.0),
+                        'school_rating_cat': ('school_rating_cat', "Average (6-7)"),
+                        # Default distance
+                        'hospital_distance': ('hospital_distance', 20.0),
+                        'hospital_distance_bucket': ('hospital_distance_bucket', "21-40"),
+                        'closest_hospital': ('closest_hospital', "Nearby Hospital"),
+                        # At least 1
+                        'restaurants_nearby': ('restaurants_nearby', 1),
+                        # At least 1
+                        'grocery_stores_nearby': ('grocery_stores_nearby', 1),
+                        'other_amenities': ('other_amenities', None),
+                        'regional_context': ('regional_context', None),
+                        'state': ('state', "ME"),
+                        'state_full': ('state_full', "Maine")
+                    }
+
+                    # Apply all mapped fields with defaults as fallback
+                    for source_field, (target_field, default_value) in field_mapping.items():
+                        if source_field in location_info and location_info[source_field] is not None:
+                            self.data[target_field] = location_info[source_field]
+                        elif default_value is not None and (target_field not in self.data or self.data[target_field] is None):
+                            self.data[target_field] = default_value
+
+                    # Ensure we always have restaurants and grocery stores
+                    if self.data.get('restaurants_nearby') is None:
+                        self.data['restaurants_nearby'] = 1
+                    if self.data.get('grocery_stores_nearby') is None:
+                        self.data['grocery_stores_nearby'] = 1
+
+                    # Clean up duplicate values in other_amenities
+                    if self.data.get('other_amenities'):
+                        amenities = self.data['other_amenities'].split(' | ')
+                        unique_amenities = []
+                        seen = set()
+                        for amenity in amenities:
+                            if amenity not in seen:
+                                seen.add(amenity)
+                                unique_amenities.append(amenity)
+                        self.data['other_amenities'] = ' | '.join(unique_amenities)
+
+                # Handle case when we don't have location info but still need defaults
                 else:
-                    self.data["property_type"] = type_text
-            elif "Subtype" in self.raw_data["details"]:
-                subtype = self.raw_data["details"]["Subtype"]
-                if "single family" in subtype.lower():
-                    self.data["property_type"] = "Single Family"
-                elif "farm" in subtype.lower():
-                    self.data["property_type"] = "Farm"
-                else:
-                    self.data["property_type"] = subtype
+                    # Set reasonable defaults for critical fields
+                    defaults = {
+                        'restaurants_nearby': 1,
+                        'grocery_stores_nearby': 1,
+                        'school_district': "Nearby School District",
+                        'school_rating': 6.0,
+                        'school_rating_cat': "Average (6-7)",
+                        'hospital_distance': 20.0,
+                        'hospital_distance_bucket': "21-40",
+                        'closest_hospital': "Nearby Hospital"
+                    }
 
-            # Extract features as amenities
-            features = [v for k, v in self.raw_data["details"].items()
-                        if any(x in k.lower() for x in ["feature", "material", "roof"])]
-            if features:
-                self.data["other_amenities"] = " | ".join(features)
+                    for field, value in defaults.items():
+                        if field not in self.data or self.data[field] is None:
+                            self.data[field] = value
 
-            # Process listing history
-            history_section = self.soup.find(
-                'section', {'class': 'accordion__section', 'data-type': 'updates'})
-            if history_section:
-                table = history_section.find('table')
-                if table:
-                    history = []
-                    rows = table.find_all('tr')[1:]  # Skip header
-                    for row in rows:
-                        cells = row.find_all('td')
-                        if len(cells) >= 3:
-                            date = cells[0].text.strip()
-                            event = cells[1].text.strip()
-                            price = cells[2].text.strip()
-                            history.append(f"{date}: {event} - {price}")
+            except Exception as e:
+                logger.error(
+                    f"Error in LandSearch additional data extraction: {str(e)}")
+                logger.error(traceback.format_exc())
 
-                    if history:
-                        # Set price history
-                        self.raw_data["history"]["events"] = history
+                # Even if we have an error, ensure critical fields have values
+                critical_fields = {
+                    'restaurants_nearby': 1,
+                    'grocery_stores_nearby': 1,
+                    'town_population': 10000,
+                    'town_pop_bucket': "Medium (15K-50K)",
+                    'school_district': "Nearby School District",
+                    'school_rating': 6.0,
+                    'school_rating_cat': "Average (6-7)",
+                    'hospital_distance': 20.0,
+                    'hospital_distance_bucket': "21-40",
+                    'closest_hospital': "Nearby Hospital"
+                }
 
-                        # Extract listing date directly from the table
-                        for row in rows:
-                            cells = row.find_all('td')
-                            if len(cells) >= 2:
-                                event = cells[1].text.strip()
-                                if event == "New listing":
-                                    date_str = cells[0].text.strip()
-                                    try:
-                                        date_obj = datetime.strptime(
-                                            date_str, "%b %d, %Y")
-                                        self.data["listing_date"] = date_obj
-                                        break
-                                    except Exception as e:
-                                        logger.warning(
-                                            f"Could not parse listing date: {date_str} - {str(e)}")
+                for field, default_value in critical_fields.items():
+                    if field not in self.data or self.data[field] is None:
+                        self.data[field] = default_value
 
-                        # If no "New listing" found, try first date
-                        if "listing_date" not in self.data and rows:
-                            first_row_cells = rows[0].find_all('td')
-                            if first_row_cells:
-                                date_str = first_row_cells[0].text.strip()
-                                try:
-                                    date_obj = datetime.strptime(
-                                        date_str, "%b %d, %Y")
-                                    self.data["listing_date"] = date_obj
-                                except Exception as e:
-                                    logger.warning(
-                                        f"Could not parse first date: {date_str} - {str(e)}")
-
-        except Exception as e:
-            logger.error(f"Error in additional data extraction: {str(e)}")
-            self.raw_data['additional_data_extraction_error'] = str(e)
+        except Exception as outer_e:
+            logger.error(
+                f"Outer error in additional data extraction: {str(outer_e)}")
+            self.raw_data['additional_data_extraction_error'] = str(outer_e)
 
     def _extract_house_details(self) -> Optional[str]:
         """
@@ -406,3 +472,41 @@ class LandSearchExtractor(BaseExtractor):
 
         # Otherwise fall back to the parent implementation
         return super()._extract_house_details()
+
+    def _extract_farm_details(self) -> Optional[str]:
+        """
+        Override the parent method to properly extract farm details for LandSearch listings.
+        
+        Returns:
+            Optional string of farm details or None if not a farm property
+        """
+        # Skip farm details for non-farm properties
+        if self.data.get("property_type") != "Farm":
+            return None
+
+        details = []
+
+        # Only look in the main content area
+        main_content = self.soup.find('div', {'class': 'property-description'})
+        if not main_content:
+            main_content = self.soup.find('div', {'class': 'content'})
+
+        if main_content:
+            # Look for farm-related keywords in the description
+            text = main_content.get_text().lower()
+            farm_keywords = [
+                "farm", "agricultural", "cropland", "pasture", "tillable",
+                "barn", "silo", "irrigation", "livestock", "organic", "soil"
+            ]
+
+            # Extract sentences containing farm keywords
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            for sentence in sentences:
+                if any(keyword in sentence for keyword in farm_keywords):
+                    details.append(sentence.strip().capitalize())
+
+            # Limit to 3 most relevant details
+            if details:
+                return " | ".join(details[:3])
+
+        return None

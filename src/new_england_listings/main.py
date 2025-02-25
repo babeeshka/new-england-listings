@@ -15,7 +15,7 @@ from bs4 import BeautifulSoup
 import traceback
 
 from .extractors import get_extractor_for_url
-from .utils.browser import get_page_content
+from .utils.browser import get_page_content, get_page_content_async
 from .utils.notion.client import create_notion_entry
 from .utils.rate_limiting import rate_limiter, RateLimitExceeded
 
@@ -83,7 +83,7 @@ async def process_listing(url: str, use_notion: bool = True, max_retries: int = 
             # Try to get content but don't fail on blocking
             try:
                 logger.info("Using Selenium for dynamic content")
-                soup = await get_page_content(url, use_selenium=True, timeout=timeout)
+                soup = await get_page_content_async(url, use_selenium=True, timeout=timeout)
 
                 # Record that a request was made for rate limiting purposes
                 if respect_rate_limits:
@@ -159,7 +159,7 @@ async def process_listing(url: str, use_notion: bool = True, max_retries: int = 
             if respect_rate_limits:
                 await rate_limiter.async_wait_if_needed(url)
 
-            soup = await get_page_content(url, use_selenium=use_selenium, timeout=timeout)
+            soup = await get_page_content_async(url, use_selenium=use_selenium, timeout=timeout)
 
             # Record that a request was made for rate limiting purposes
             if respect_rate_limits:

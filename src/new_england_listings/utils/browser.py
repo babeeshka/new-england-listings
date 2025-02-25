@@ -1,4 +1,5 @@
 # src/new_england_listings/utils/browser.py
+import asyncio
 from typing import Optional, Dict
 from bs4 import BeautifulSoup
 import requests
@@ -142,6 +143,26 @@ def get_stealth_driver() -> webdriver.Chrome:
 
     return driver
 
+
+async def get_page_content_async(url: str, use_selenium: bool = False, max_retries: int = 3, timeout: int = 30) -> BeautifulSoup:
+    """
+    Asynchronous wrapper for get_page_content.
+    Runs the synchronous function in a thread pool to make it compatible with async/await.
+    
+    Args:
+        url: URL to fetch
+        use_selenium: Whether to use Selenium for rendering JavaScript
+        max_retries: Maximum number of retry attempts
+        timeout: Request timeout in seconds
+        
+    Returns:
+        BeautifulSoup object of the page content
+    """
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None,  # Uses the default executor
+        lambda: get_page_content(url, use_selenium, max_retries, timeout)
+    )
 
 def get_page_content(url: str, use_selenium: bool = False, max_retries: int = 3, timeout: int = 30) -> BeautifulSoup:
     """Get page content with enhanced stealth and retry logic."""
