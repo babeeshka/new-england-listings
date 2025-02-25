@@ -933,38 +933,28 @@ class FarmlandExtractor(BaseExtractor):
             return {}
 
     def _process_location_info(self, location_info: Dict[str, Any]):
-        """Process and validate location-based information."""
+        """Process location information with Farmland specific logic."""
+        # Call the base implementation first
+        super()._process_location_info(location_info)
+
         try:
-            # Distance metrics
-            if 'distance_to_portland' in location_info:
-                self.data["distance_to_portland"] = float(
-                    location_info["distance_to_portland"])
-                self.data["portland_distance_bucket"] = self._get_distance_bucket(
-                    float(location_info["distance_to_portland"]))
+            # Farmland specific processing
+            # Handle soil quality data that might be specific to farmland
+            if 'soil_quality_rating' in location_info:
+                self.data["soil_quality_rating"] = float(
+                    location_info["soil_quality_rating"])
 
-            # Population metrics
-            if 'town_population' in location_info:
-                self.data["town_population"] = int(
-                    location_info["town_population"])
-                self.data["town_pop_bucket"] = self._get_population_bucket(
-                    int(location_info["town_population"]))
+            # Process agricultural zone data
+            if 'agricultural_zone' in location_info:
+                self.data["agricultural_zone"] = location_info["agricultural_zone"]
 
-            # School metrics
-            if 'school_rating' in location_info:
-                self.data["school_rating"] = float(
-                    location_info["school_rating"])
-                self.data["school_rating_cat"] = self._get_school_rating_category(
-                    float(location_info["school_rating"]))
-
-            # Hospital metrics
-            if 'hospital_distance' in location_info:
-                self.data["hospital_distance"] = float(
-                    location_info["hospital_distance"])
-                self.data["hospital_distance_bucket"] = self._get_distance_bucket(
-                    float(location_info["hospital_distance"]))
+            # Process water rights data
+            if 'water_rights' in location_info:
+                self.data["water_rights"] = location_info["water_rights"]
 
         except Exception as e:
-            logger.error(f"Error processing location info: {str(e)}")
+            logger.error(
+                f"Error processing Farmland-specific location info: {str(e)}")
 
     def _get_distance_bucket(self, distance: float) -> str:
         """Convert distance to appropriate bucket enum."""

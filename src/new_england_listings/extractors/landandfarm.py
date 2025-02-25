@@ -482,52 +482,32 @@ class LandAndFarmExtractor(BaseExtractor):
             logger.error(f"Error in additional data extraction: {str(e)}")
             self.raw_data["extraction_error"] = str(e)
 
+
     def _process_location_info(self, location_info: Dict[str, Any]):
-        """Process and validate location-based information."""
+        """Process location information with LandAndFarm specific logic."""
+        # Call the base implementation first
+        super()._process_location_info(location_info)
+
         try:
-            # Distance metrics
-            if 'distance_to_portland' in location_info:
-                self.data["distance_to_portland"] = float(
-                    location_info["distance_to_portland"])
-                self.data["portland_distance_bucket"] = self._get_distance_bucket(
-                    float(location_info["distance_to_portland"]))
+            # LandAndFarm specific processing
+            # For example, handle any special fields that only LandAndFarm uses
+            if 'land_features' in location_info:
+                land_features = location_info['land_features']
+                if land_features:
+                    existing_features = self.data.get("land_features", [])
+                    self.data["land_features"] = list(
+                        set(existing_features + land_features))
 
-            # Population metrics
-            if 'town_population' in location_info:
-                self.data["town_population"] = int(
-                    location_info["town_population"])
-                self.data["town_pop_bucket"] = self._get_population_bucket(
-                    int(location_info["town_population"]))
-
-            # School metrics
-            if 'school_rating' in location_info:
-                self.data["school_rating"] = float(
-                    location_info["school_rating"])
-                self.data["school_rating_cat"] = self._get_school_rating_category(
-                    float(location_info["school_rating"]))
-                if 'school_district' in location_info:
-                    self.data["school_district"] = location_info["school_district"]
-
-            # Healthcare metrics
-            if 'hospital_distance' in location_info:
-                self.data["hospital_distance"] = float(
-                    location_info["hospital_distance"])
-                self.data["hospital_distance_bucket"] = self._get_distance_bucket(
-                    float(location_info["hospital_distance"]))
-                if 'closest_hospital' in location_info:
-                    self.data["closest_hospital"] = location_info["closest_hospital"]
-
-            # Amenities
-            if 'other_amenities' in location_info:
-                existing = self.data.get("other_amenities", "")
-                new = location_info.get("other_amenities", "")
-                if existing and new:
-                    self.data["other_amenities"] = f"{existing} | {new}"
-                elif new:
-                    self.data["other_amenities"] = new
+            # Special handling for rural properties
+            if 'distance_to_nearest_highway' in location_info:
+                self.data["distance_to_nearest_highway"] = float(
+                    location_info["distance_to_nearest_highway"])
 
         except Exception as e:
-            logger.error(f"Error processing location info: {str(e)}")
+            logger.error(
+                f"Error processing LandAndFarm-specific location info: {str(e)}")
+            if hasattr(self, 'raw_data'):
+                self.raw_data["landfarm_location_error"] = str(e)
 
     def _get_distance_bucket(self, distance: float) -> str:
         """Convert distance to appropriate bucket enum."""

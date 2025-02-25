@@ -183,6 +183,29 @@ class LandSearchExtractor(BaseExtractor):
 
         return "Location Unknown"
 
+    def _process_location_info(self, location_info: Dict[str, Any]):
+        """Process location information with LandSearch specific logic."""
+        # Call the base implementation first
+        super()._process_location_info(location_info)
+
+        try:
+            # LandSearch specific processing
+            # Handle recreation information
+            if 'recreation_areas_nearby' in location_info:
+                self.data["recreation_areas_nearby"] = location_info["recreation_areas_nearby"]
+
+            # Process hunting/fishing data
+            if 'hunting_zone' in location_info:
+                self.data["hunting_zone"] = location_info["hunting_zone"]
+
+            # Add specific zoning information
+            if 'zoning_details' in location_info:
+                self.data["zoning_details"] = location_info["zoning_details"]
+
+        except Exception as e:
+            logger.error(
+                f"Error processing LandSearch-specific location info: {str(e)}")
+
     def extract_acreage_info(self) -> Tuple[str, str]:
         """Extract acreage information."""
         # Try to find acreage in title first
@@ -259,16 +282,6 @@ class LandSearchExtractor(BaseExtractor):
                 **LANDSEARCH_SELECTORS["price"]["container"])
             if price_container:
                 self.raw_data["price"]["text"] = price_container.text.strip()
-
-            # Extract location (already set by extract_location)
-            location_container = self.soup.find(
-                **LANDSEARCH_SELECTORS["location"]["container"])
-            if location_container:
-                full_address = location_container.find(
-                    **LANDSEARCH_SELECTORS["location"]["address"])
-                if full_address:
-                    self.raw_data["location"]["full_address"] = clean_html_text(
-                        full_address.text)
 
             # Extract property description for notes
             description = self.soup.find(

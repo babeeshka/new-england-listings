@@ -344,6 +344,29 @@ class FarmLinkExtractor(BaseExtractor):
 
         return amenities
 
+    def _process_location_info(self, location_info: Dict[str, Any]):
+        """Process location information with FarmLink specific logic."""
+        # Call the base implementation first
+        super()._process_location_info(location_info)
+
+        try:
+            # FarmLink specific processing
+            # Process community farming data
+            if 'community_farm_status' in location_info:
+                self.data["community_farm_status"] = location_info["community_farm_status"]
+
+            # Add local farmer's market information
+            if 'farmers_markets_nearby' in location_info:
+                self.data["farmers_markets_nearby"] = location_info["farmers_markets_nearby"]
+
+            # Process CSA information
+            if 'csa_participation' in location_info:
+                self.data["csa_participation"] = location_info["csa_participation"]
+
+        except Exception as e:
+            logger.error(
+                f"Error processing FarmLink-specific location info: {str(e)}")
+
     def extract(self, soup: BeautifulSoup) -> Dict[str, Any]:
         """Main extraction method."""
         logger.debug(f"Starting extraction for {self.platform_name}")

@@ -107,6 +107,55 @@ class BaseExtractor(ABC):
 
         logger.debug("=== END DIAGNOSTIC INFO ===")
 
+    def _process_location_info(self, location_info: Dict[str, Any]):
+        """Process location information with LandSearch specific logic."""
+        # Process standard fields directly instead of calling super()
+        try:
+            # Distance metrics
+            if 'distance_to_portland' in location_info:
+                self.data["distance_to_portland"] = float(
+                    location_info["distance_to_portland"])
+                self.data["portland_distance_bucket"] = self._get_distance_bucket(
+                    float(location_info["distance_to_portland"]))
+
+            # Population metrics
+            if 'town_population' in location_info:
+                self.data["town_population"] = int(
+                    location_info["town_population"])
+                self.data["town_pop_bucket"] = self._get_population_bucket(
+                    int(location_info["town_population"]))
+
+            # School metrics
+            if 'school_rating' in location_info:
+                self.data["school_rating"] = float(
+                    location_info["school_rating"])
+                self.data["school_rating_cat"] = self._get_school_rating_category(
+                    float(location_info["school_rating"]))
+
+            # Hospital metrics
+            if 'hospital_distance' in location_info:
+                self.data["hospital_distance"] = float(
+                    location_info["hospital_distance"])
+                self.data["hospital_distance_bucket"] = self._get_distance_bucket(
+                    float(location_info["hospital_distance"]))
+
+            # LandSearch specific processing
+            # Handle recreation information
+            if 'recreation_areas_nearby' in location_info:
+                self.data["recreation_areas_nearby"] = location_info["recreation_areas_nearby"]
+
+            # Process hunting/fishing data
+            if 'hunting_zone' in location_info:
+                self.data["hunting_zone"] = location_info["hunting_zone"]
+
+            # Add specific zoning information
+            if 'zoning_details' in location_info:
+                self.data["zoning_details"] = location_info["zoning_details"]
+
+        except Exception as e:
+            logger.error(
+                f"Error processing location info: {str(e)}")
+
     def extract(self, soup: BeautifulSoup) -> PropertyListing:
         """Main extraction method with validation."""
         logger.debug(f"Starting extraction for {self.platform_name}")
