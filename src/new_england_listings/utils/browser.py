@@ -271,7 +271,6 @@ def get_page_content(url: str, use_selenium: bool = False, max_retries: int = 3,
 
     raise Exception(f"Failed to fetch page after {max_retries} attempts")
 
-
 def wait_for_load(driver: webdriver.Chrome, timeout: int = 90) -> bool:
     """Wait for page to load with enhanced checks."""
     logger.debug("Waiting for page load...")
@@ -335,7 +334,6 @@ def wait_for_load(driver: webdriver.Chrome, timeout: int = 90) -> bool:
         logger.error(f"Error during page load: {str(e)}")
         return False
 
-
 def get_page_with_retry(url: str, max_retries: int = 3) -> Optional[str]:
     """Get page content with enhanced retry logic."""
     logger.debug(f"Attempting to fetch {url}")
@@ -370,7 +368,6 @@ def get_page_with_retry(url: str, max_retries: int = 3) -> Optional[str]:
 
     return None
 
-
 def get_random_user_agent() -> str:
     """Get a random user agent string."""
     user_agents = [
@@ -380,6 +377,5 @@ def get_random_user_agent() -> str:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15"
     ]
     return random.choice(user_agents)
-
 
 get_selenium_driver = get_stealth_driver

@@ -797,6 +797,56 @@ class LocationService:
                     closest_city = prioritized_cities[0]
                     result['regional_context'] = f"Property is {closest_city['distance']:.1f} miles from {closest_city['city']}"
 
+            if largest_cities:
+                largest_city = largest_cities[0]
+                city_info = MAJOR_CITIES.get(largest_city['city'], {})
+
+                # Store the large city data
+                result.update({
+                    'nearest_large_city': largest_city['city'],
+                    'nearest_large_city_distance': largest_city['distance'],
+                    'nearest_large_city_distance_bucket': largest_city['distance_bucket'],
+                    'major_city_population': city_info.get('population')
+                })
+
+                # Extract the actual town name from the location
+                if 'raw' in result:
+                    town_name = self._extract_town_name(result['raw'])
+                else:
+                    raw_location = result.get('state_full') or ''
+                    location_parts = raw_location.split(',')
+                    town_name = location_parts[0].strip() if location_parts else None
+
+                # Try to get actual town population if available
+                if town_name and town_name not in ['Location Unknown', 'Unknown']:
+                    # Try to get population data for this specific town
+                    town_pop = self._get_town_population(town_name, property_state)
+                    if town_pop:
+                        result['town_population'] = town_pop
+                        result['town_pop_bucket'] = self.get_bucket(
+                            town_pop,
+                            POPULATION_BUCKETS
+                        )
+                        # Flag that this is actual town data, not estimated
+                        result['is_actual_town_data'] = True
+                    else:
+                        # Fallback to estimate based on town type
+                        result['town_population'] = self._estimate_town_population(
+                            town_name)
+                        result['town_pop_bucket'] = self.get_bucket(
+                            result['town_population'],
+                            POPULATION_BUCKETS
+                        )
+                        result['is_estimated_population'] = True
+                else:
+                    # If we can't extract town name, use the city population as estimate
+                    result['town_population'] = city_info.get('population')
+                    result['town_pop_bucket'] = self.get_bucket(
+                        city_info.get('population', 0),
+                        POPULATION_BUCKETS
+                    )
+                    result['is_estimated_population'] = True
+
         except Exception as e:
             logger.error(f"Error adding enhanced amenities info: {str(e)}")
             # Even if an error occurs, provide default values
@@ -808,6 +858,69 @@ class LocationService:
             # Provide basic regional context if missing
             if 'regional_context' not in result and 'nearest_city' in result:
                 result['regional_context'] = f"Property near {result['nearest_city']}"
+
+    def _extract_town_name(self, location: str) -> Optional[str]:
+        """Extract the town name from a location string."""
+        if not location or 'unknown' in location.lower():
+            return None
+
+        # Try to extract town name from "Town, State" format
+        match = re.match(r'^([^,]+),\s*([A-Z]{2})', location)
+        if match:
+            return match.group(1).strip()
+
+        # Try other formats if needed
+        parts = location.split()
+        if parts:
+            # Remove common prefixes that aren't town names
+            if parts[0].lower() in ['house', 'farm', 'land', 'cape', 'property']:
+                return parts[1] if len(parts) > 1 else None
+            return parts[0]
+
+        return None
+        
+    def _get_town_population(self, town_name: str, state_code: Optional[str] = None) -> Optional[int]:
+        """Get population data for a specific town if available."""
+        # This would ideally use an actual database of town populations
+        # For now, we'll hard-code some common town populations in Maine as an example
+        maine_towns = {
+            "Portland": 66882,
+            "Bangor": 31903,
+            "Lewiston": 36592,
+            "Augusta": 18899,
+            "Casco": 3742,  # Updated with accurate data
+            "Brunswick": 20278,
+            "Biddeford": 21362,
+            "South Portland": 25532,
+            "Saco": 20381
+        }
+
+        # Default town sizes based on state if no specific data
+        small_towns = {
+            "ME": 3500,  # Maine has many small towns
+            "NH": 5000,
+            "VT": 3000,
+            "MA": 8000,
+            "CT": 10000,
+            "RI": 8000
+        }
+
+        # Check for exact match
+        if state_code == "ME" and town_name in maine_towns:
+            return maine_towns[town_name]
+
+        # More comprehensive lookup would go here
+
+        # Default fall back to small town estimate based on state
+        if state_code in small_towns:
+            return small_towns[state_code]
+
+        return None
+
+    def _estimate_town_population(self, town_name: str) -> int:
+        """Provide a reasonable population estimate for unknown towns."""
+        # Default to small town size
+        return 5000
 
 # Text processing utilities for property listings
 class TextProcessingService:

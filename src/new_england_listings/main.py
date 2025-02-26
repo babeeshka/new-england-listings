@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # Set up global configuration
 MAX_RETRIES = 3
 DEFAULT_TIMEOUT = 30
-RETRY_DELAY_FACTOR = 2  # Base for exponential backoff
+RETRY_DELAY_FACTOR = 2 
 
 
 def needs_selenium(url: str) -> bool:
@@ -46,7 +46,6 @@ def needs_selenium(url: str) -> bool:
         "farmlink.mainefarmlandtrust.org"
     ]
     return any(domain in url.lower() for domain in selenium_domains)
-
 
 async def process_listing(url: str, use_notion: bool = True, max_retries: int = MAX_RETRIES,
                           timeout: int = DEFAULT_TIMEOUT, respect_rate_limits: bool = True) -> Dict[str, Any]:
@@ -119,7 +118,8 @@ async def process_listing(url: str, use_notion: bool = True, max_retries: int = 
             # Create Notion entry if requested
             if use_notion:
                 logger.info("Creating Notion entry...")
-                await create_notion_entry(data)
+                # Don't use await with create_notion_entry here
+                notion_response = create_notion_entry(data)
                 logger.info("Notion entry created successfully")
 
             return data
@@ -177,7 +177,8 @@ async def process_listing(url: str, use_notion: bool = True, max_retries: int = 
             # Create Notion entry if requested
             if use_notion:
                 logger.info("Creating Notion entry...")
-                await create_notion_entry(data)
+                # Don't use await with create_notion_entry here
+                notion_response = create_notion_entry(data)
                 logger.info("Notion entry created successfully")
 
             # Log success with key data points
@@ -222,7 +223,6 @@ async def process_listing(url: str, use_notion: bool = True, max_retries: int = 
 
     # This should never be reached due to the raise in the loop, but just in case
     raise Exception(f"Failed to process listing: {last_error}")
-
 
 async def process_listings(urls: List[str], use_notion: bool = True,
                            max_retries: int = MAX_RETRIES,
@@ -274,7 +274,6 @@ async def process_listings(urls: List[str], use_notion: bool = True,
 
     return results
 
-
 def setup_logging(level=logging.INFO, log_file=None):
     """Set up logging configuration."""
     log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -296,7 +295,6 @@ def setup_logging(level=logging.INFO, log_file=None):
     logging.getLogger('urllib3').setLevel(logging.WARNING)
     logging.getLogger('selenium').setLevel(logging.WARNING)
     logging.getLogger('asyncio').setLevel(logging.WARNING)
-
 
 async def main(urls=None):
     """
@@ -354,7 +352,6 @@ async def main(urls=None):
         logger.error(f"Error in main execution: {str(e)}")
         logger.error(traceback.format_exc())
         sys.exit(1)
-
 
 if __name__ == "__main__":
     asyncio.run(main())

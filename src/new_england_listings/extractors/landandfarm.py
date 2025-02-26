@@ -446,6 +446,25 @@ class LandAndFarmExtractor(BaseExtractor):
 
             # Also check description for amenities
             description = self._extract_description() or ""
+            amenity_keywords = {
+                "well": "Well water",
+                "septic": "Septic system",
+                "electric": "Electricity",
+                "utilities": "Utilities available",
+                "road": "Road frontage",
+                "fenced": "Fenced",
+                "wooded": "Wooded",
+                "cleared": "Cleared land",
+                "stream": "Stream",
+                "pond": "Pond",
+                "barn": "Barn",
+                "outbuilding": "Outbuildings",
+                "garden": "Garden area",
+                "view": "Scenic view",
+                "waterfront": "Waterfront",
+                "hunting": "Hunting land"
+            }
+
             for keyword, amenity in amenity_keywords.items():
                 if keyword in description.lower():
                     amenities.add(amenity)
