@@ -55,22 +55,103 @@ class NotionClient:
             logger.error(f"Data validation failed: {str(e)}")
             raise
 
+    def _extract_region(self, location: str) -> Optional[str]:
+        """Extract region from location string for all New England states."""
+        if not location or location == "Location Unknown":
+            return None
+
+        # Extract state
+        state_match = re.search(r',\s*([A-Z]{2})', location)
+        if not state_match:
+            return None
+
+        state = state_match.group(1)
+
+        # Define regions for all New England states
+        regions = {
+            "ME": {
+                "Southern Maine": ["Portland", "Biddeford", "Saco", "York", "Kennebunk", "Kittery", "Wells", "Cumberland"],
+                "Central Maine": ["Augusta", "Lewiston", "Auburn", "Turner", "Waterville", "Farmington"],
+                "Coastal Maine": ["Brunswick", "Bath", "Rockland", "Camden", "Boothbay", "Bar Harbor", "Phippsburg"],
+                "Western Maine": ["Bethel", "Rumford", "Norway", "Fryeburg", "Bridgton"],
+                "Northern Maine": ["Bangor", "Orono", "Presque Isle", "Caribou", "Houlton"]
+            },
+            "NH": {
+                "Seacoast NH": ["Portsmouth", "Dover", "Durham", "Hampton", "Exeter", "Rye"],
+                "White Mountains": ["North Conway", "Jackson", "Bartlett", "Lincoln", "Franconia"],
+                "Lakes Region NH": ["Laconia", "Meredith", "Wolfeboro", "Alton", "Gilford"],
+                "Southern NH": ["Nashua", "Manchester", "Concord", "Salem", "Bedford", "Derry"]
+            },
+            "VT": {
+                "Northeast Kingdom": ["St. Johnsbury", "Newport", "Lyndonville", "Burke"],
+                "Central Vermont": ["Montpelier", "Barre", "Waterbury", "Stowe", "Middlebury"],
+                "Southern Vermont": ["Brattleboro", "Bennington", "Manchester", "Rutland"],
+                "Northwest Vermont": ["Burlington", "Essex", "St. Albans", "Colchester"]
+            },
+            "MA": {
+                "Boston Area": ["Boston", "Cambridge", "Somerville", "Brookline", "Newton"],
+                "South Shore MA": ["Quincy", "Braintree", "Hingham", "Plymouth", "Duxbury"],
+                "North Shore MA": ["Salem", "Beverly", "Gloucester", "Newburyport", "Ipswich"],
+                "Western MA": ["Springfield", "Northampton", "Amherst", "Pittsfield", "Great Barrington"],
+                "Cape Cod": ["Barnstable", "Falmouth", "Chatham", "Provincetown", "Hyannis"]
+            },
+            "CT": {
+                "Fairfield County": ["Stamford", "Greenwich", "Norwalk", "Bridgeport", "Westport"],
+                "New Haven Area": ["New Haven", "Hamden", "Guilford", "Madison", "Branford"],
+                "Hartford Area": ["Hartford", "West Hartford", "Glastonbury", "Farmington"],
+                "Eastern CT": ["Mystic", "New London", "Stonington", "Norwich", "Groton"]
+            },
+            "RI": {
+                "Providence Area": ["Providence", "Cranston", "Warwick", "East Providence"],
+                "South County": ["Narragansett", "South Kingstown", "Westerly", "Charlestown"],
+                "East Bay": ["Newport", "Bristol", "Barrington", "Middletown"],
+                "Northern RI": ["Woonsocket", "Cumberland", "Lincoln", "Smithfield"]
+            }
+        }
+
+        if state in regions:
+            for region, cities in regions[state].items():
+                if any(city in location for city in cities):
+                    return region
+
+        # Default regions by state
+        state_regions = {
+            "ME": "Maine",
+            "NH": "New Hampshire",
+            "VT": "Vermont",
+            "MA": "Massachusetts",
+            "CT": "Connecticut",
+            "RI": "Rhode Island"
+        }
+        return state_regions.get(state)
+
     def _format_properties(self, data: Union[Dict[str, Any], PropertyListing]) -> Dict[str, Any]:
-        """Format validated data into Notion properties structure with correct field types."""
+        """Format validated data to match the Notion database with select fields."""
         if isinstance(data, dict):
             validated_data = self._validate_data(data)
         else:
             validated_data = data
 
+        # Ensure all values have fallbacks for None
+        def safe_str(value):
+            """Safely convert value to string, handling None values."""
+            return str(value) if value is not None else ""
+
         properties = {
-            # Basic Information
+            # Basic Information - preserving title for listing name
             "Listing Name": {
                 "title": [{"text": {"content": truncate_text(validated_data.listing_name, 2000)}}]
             },
             "URL": {"url": str(validated_data.url)},
-            "Platform": {"rich_text": [{"text": {"content": validated_data.platform}}]},
+
+            # Use select for categorization fields (previously rich_text)
+            "Platform": {
+                "select": {
+                    "name": safe_str(validated_data.platform)
+                }
+            },
             "Location": {
-                "rich_text": [{"text": {"content": truncate_text(validated_data.location, 2000)}}]
+                "rich_text": [{"text": {"content": truncate_text(safe_str(validated_data.location), 2000)}}]
             },
 
             # Price Information
@@ -78,36 +159,43 @@ class NotionClient:
                 "number": parse_price_to_number(validated_data.price)
             },
             "Price Bucket": {
-                "rich_text": [{"text": {"content": validated_data.price_bucket}}]
+                "select": {
+                    "name": safe_str(validated_data.price_bucket)
+                }
             },
 
-            # Property Classification
+            # Property Classification - using select
             "Property Type": {
-                "rich_text": [{"text": {"content": validated_data.property_type}}]
+                "select": {
+                    "name": safe_str(validated_data.property_type)
+                }
             },
             "Acreage": {
                 "number": parse_acreage_to_number(validated_data.acreage)
             },
             "Acreage Bucket": {
-                "rich_text": [{"text": {"content": validated_data.acreage_bucket}}]
+                "select": {
+                    "name": safe_str(validated_data.acreage_bucket)
+                }
             },
 
-            # Dates
+            # Dates - using rich_text for Last Updated as expected by database
             "Last Updated": {
-                "date": {"start": format_notion_date()}
+                "rich_text": [{"text": {"content": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}}]
             }
         }
 
-
         # Optional fields with proper typing
         if validated_data.listing_date:
-            # Convert to the correct timezone before formatting
-            eastern = ZoneInfo("America/New_York")
-            listing_date_eastern = validated_data.listing_date.replace(
-                tzinfo=timezone.utc).astimezone(eastern)
+            # Format date as text since we're using rich_text for dates
+            if isinstance(validated_data.listing_date, datetime):
+                date_str = validated_data.listing_date.strftime("%Y-%m-%d")
+            else:
+                date_str = safe_str(validated_data.listing_date)
+
             properties["Listing Date"] = {
-                "date": {"start": listing_date_eastern.isoformat()}
-    }
+                "rich_text": [{"text": {"content": date_str}}]
+            }
 
         # Location Metrics (as numbers)
         if validated_data.distance_to_portland is not None:
@@ -115,7 +203,9 @@ class NotionClient:
                 "number": float(validated_data.distance_to_portland)
             }
             properties["Portland Distance Bucket"] = {
-                "rich_text": [{"text": {"content": validated_data.portland_distance_bucket}}]
+                "select": {  # Changed from rich_text to select
+                    "name": safe_str(validated_data.portland_distance_bucket)
+                }
             }
 
         if validated_data.town_population is not None:
@@ -123,7 +213,9 @@ class NotionClient:
                 "number": int(validated_data.town_population)
             }
             properties["Town Pop. Bucket"] = {
-                "rich_text": [{"text": {"content": validated_data.town_pop_bucket}}]
+                "select": {  # Changed from rich_text to select
+                    "name": safe_str(validated_data.town_pop_bucket)
+                }
             }
 
         # Educational Metrics
@@ -132,11 +224,13 @@ class NotionClient:
                 "number": float(validated_data.school_rating)
             }
             properties["School Rating Cat."] = {
-                "rich_text": [{"text": {"content": validated_data.school_rating_cat}}]
+                "select": {  # Changed from rich_text to select
+                    "name": safe_str(validated_data.school_rating_cat)
+                }
             }
         if validated_data.school_district:
             properties["School District"] = {
-                "rich_text": [{"text": {"content": truncate_text(validated_data.school_district, 2000)}}]
+                "rich_text": [{"text": {"content": truncate_text(safe_str(validated_data.school_district), 2000)}}]
             }
 
         # Healthcare Metrics
@@ -145,14 +239,25 @@ class NotionClient:
                 "number": float(validated_data.hospital_distance)
             }
             properties["Hospital Distance Bucket"] = {
-                "rich_text": [{"text": {"content": validated_data.hospital_distance_bucket}}]
+                "select": {  # Changed from rich_text to select
+                    "name": safe_str(validated_data.hospital_distance_bucket)
+                }
             }
         if validated_data.closest_hospital:
             properties["Closest Hospital"] = {
-                "rich_text": [{"text": {"content": truncate_text(validated_data.closest_hospital, 2000)}}]
+                "rich_text": [{"text": {"content": truncate_text(safe_str(validated_data.closest_hospital), 2000)}}]
             }
 
-        # Amenities (as numbers where appropriate)
+        # Fix for Other Amenities - using multi_select as expected by database
+        if validated_data.other_amenities:
+            # Split by pipe and create multi-select options
+            amenities_list = [a.strip() for a in safe_str(
+                validated_data.other_amenities).split('|') if a.strip()]
+            properties["Other Amenities"] = {
+                "multi_select": [{"name": amenity} for amenity in amenities_list[:100]]
+            }
+
+        # Use number type for numeric amenities
         if validated_data.restaurants_nearby is not None:
             properties["Restaurants Nearby"] = {
                 "number": int(validated_data.restaurants_nearby)
@@ -160,10 +265,6 @@ class NotionClient:
         if validated_data.grocery_stores_nearby is not None:
             properties["Grocery Stores Nearby"] = {
                 "number": int(validated_data.grocery_stores_nearby)
-            }
-        if validated_data.other_amenities:
-            properties["Other Amenities"] = {
-                "rich_text": [{"text": {"content": truncate_text(validated_data.other_amenities, 2000)}}]
             }
 
         # Property Details
@@ -177,8 +278,35 @@ class NotionClient:
             value = getattr(validated_data, field, None)
             if value:
                 properties[notion_name] = {
-                    "rich_text": [{"text": {"content": truncate_text(str(value), 2000)}}]
+                    "rich_text": [{"text": {"content": truncate_text(safe_str(value), 2000)}}]
                 }
+
+        # Add optional status, region, and favorite fields if they exist in your database
+        # Include these only if you've added them to your Notion database
+        try:
+            # Extract region
+            region = self._extract_region(validated_data.location)
+            if region:
+                properties["Region"] = {
+                    "select": {
+                        "name": region
+                    }
+                }
+
+            # Set default status for new entries
+            properties["Status"] = {
+                "select": {
+                    "name": "New"
+                }
+            }
+
+            # Set default favorite status
+            properties["Favorite"] = {
+                "checkbox": False
+            }
+        except Exception as e:
+            # If these properties don't exist, we'll just ignore them
+            logger.debug(f"Optional properties not set: {str(e)}")
 
         return properties
 
@@ -316,6 +444,7 @@ class NotionClient:
 # Create singleton instance
 notion = NotionClient()
 
+
 def truncate_text(text: str, max_length: int = 2000) -> str:
     """Truncate text to max_length characters, adding ellipsis if needed."""
     if not text:
@@ -324,37 +453,64 @@ def truncate_text(text: str, max_length: int = 2000) -> str:
         return text
     return text[:max_length-3] + "..."
 
+
 def parse_price_to_number(price_text: str) -> Optional[float]:
-    """Convert price text to number for Notion."""
-    if not price_text or price_text in ["Contact for Price", "N/A"]:
+    """Convert price text to number with enhanced parsing."""
+    if not price_text or isinstance(price_text, str) and price_text.lower() in ["contact for price", "n/a"]:
         return None
 
     try:
+        # Handle K notation
+        if 'K' in price_text:
+            clean_price = price_text.replace(
+                '$', '').replace(',', '').replace('K', '')
+            return float(clean_price) * 1000
+
+        # Handle million notation
+        if 'M' in price_text:
+            clean_price = price_text.replace(
+                '$', '').replace(',', '').replace('M', '')
+            return float(clean_price) * 1000000
+
         # Remove $ and commas
         clean_price = price_text.replace('$', '').replace(',', '')
 
-        # Handle "1.5M" format
-        if 'M' in clean_price:
-            clean_price = clean_price.replace('M', '')
-            return float(clean_price) * 1000000
-
-        return float(clean_price)
-    except (ValueError, TypeError):
+        # Try to convert to float
+        try:
+            return float(clean_price)
+        except ValueError:
+            # Additional fallback for numeric extraction
+            match = re.search(r'(\d+(?:\.\d+)?)', clean_price)
+            if match:
+                return float(match.group(1))
+            return None
+    except Exception as e:
+        logger.warning(f"Error parsing price '{price_text}': {e}")
         return None
 
+
 def parse_acreage_to_number(acreage_text: str) -> Optional[float]:
-    """Convert acreage text to number for Notion."""
-    if not acreage_text or acreage_text in ["Not specified", "Unknown"]:
+    """Convert acreage text to number with enhanced parsing."""
+    if not acreage_text or acreage_text.lower() in ["not specified", "unknown"]:
         return None
 
     try:
-        # Extract number before "acres"
-        match = re.search(r'([\d.]+)', acreage_text)
+        # Handle common patterns
+        acre_match = re.search(
+            r'(\d+(?:\.\d+)?)\s*acres?', acreage_text.lower())
+        if acre_match:
+            return float(acre_match.group(1))
+
+        # Fallback to any numeric extraction
+        match = re.search(r'(\d+(?:\.\d+)?)', acreage_text)
         if match:
             return float(match.group(1))
+
         return None
-    except (ValueError, TypeError):
+    except Exception as e:
+        logger.warning(f"Error parsing acreage '{acreage_text}': {e}")
         return None
+
 
 def format_notion_date(dt=None):
     """Format a datetime for Notion API with timezone adjustment for Eastern Time."""
@@ -362,11 +518,12 @@ def format_notion_date(dt=None):
         dt = datetime.now()
 
     # Convert to Eastern Time
-    eastern = ZoneInfo("America/New_York")  # Florida is in Eastern Time
+    eastern = ZoneInfo("America/New_York")
     dt_eastern = dt.astimezone(eastern)
 
     # Format for Notion (ISO format)
     return dt_eastern.isoformat()
+
 
 async def create_notion_entry(data: Union[Dict[str, Any], PropertyListing], update_if_exists: bool = True) -> Dict[str, Any]:
     """
@@ -380,6 +537,7 @@ async def create_notion_entry(data: Union[Dict[str, Any], PropertyListing], upda
         Dictionary containing the Notion API response
     """
     return notion.create_entry(data, update_if_exists=update_if_exists)
+
 
 def create_notion_entry(data: Union[Dict[str, Any], PropertyListing], update_if_exists: bool = True) -> Dict[str, Any]:
     """

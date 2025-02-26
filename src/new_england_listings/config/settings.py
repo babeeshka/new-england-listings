@@ -129,3 +129,21 @@ def get_settings(env: Optional[str] = None) -> Settings:
     if env and env != settings.env:
         settings = Settings(env)
     return settings
+
+
+def get_fresh_settings(force_reload=False):
+    """Get settings with a forced environment reload."""
+    if force_reload:
+        # Force reload .env file
+        from dotenv import load_dotenv
+        load_dotenv(override=True)
+
+        # Reset the settings instance
+        global settings
+        settings = Settings()
+
+    return settings
+
+
+# Then update how NOTION_DATABASE_ID is defined:
+NOTION_DATABASE_ID = get_fresh_settings(force_reload=True).notion.database_id

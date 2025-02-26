@@ -3,6 +3,8 @@ Main execution module for the New England Listings project.
 Handles orchestration of extraction process and output to Notion.
 """
 
+
+import atexit
 import asyncio
 import json
 import logging
@@ -15,6 +17,7 @@ from bs4 import BeautifulSoup
 import traceback
 
 from .extractors import get_extractor_for_url
+from new_england_listings.utils.browser import cleanup_driver
 from .utils.browser import get_page_content, get_page_content_async
 from .utils.notion.client import create_notion_entry
 from .utils.rate_limiting import rate_limiter, RateLimitExceeded
@@ -355,3 +358,5 @@ async def main(urls=None):
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+atexit.register(cleanup_driver)

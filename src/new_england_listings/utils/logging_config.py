@@ -155,6 +155,12 @@ def configure_logging(level=logging.INFO,
     Returns:
         Logger instance configured for the application
     """
+    root_logger = logging.getLogger()
+    if root_logger.handlers:
+        logger = logging.getLogger(__name__)
+        logger.debug("Logging already configured, skipping initialization")
+        return root_logger
+    
     # Make sure context always contains run_id
     if context is None:
         context = {}

@@ -689,11 +689,11 @@ class LocationService:
                         )
                     })
 
-                # Add info about best school in the area for comparison
-                best_school = max(schools, key=lambda x: x['rating'])
-                if best_school['district'] != result.get('school_district'):
-                    result['best_nearby_school_district'] = best_school['district']
-                    result['best_nearby_school_rating'] = best_school['rating']
+                    # Add info about best school in the area for comparison
+                    best_school = max(schools, key=lambda x: x['rating'])
+                    if best_school['district'] != result.get('school_district'):
+                        result['best_nearby_school_district'] = best_school['district']
+                        result['best_nearby_school_rating'] = best_school['rating']
             else:
                 # Always provide school data (use nearest city with a default rating if no specific school found)
                 if 'nearest_city' in result:
@@ -718,7 +718,7 @@ class LocationService:
 
                 # More comprehensive keyword matching for restaurants
                 restaurant_keywords = ['restaurant', 'dining',
-                                       'cafe', 'food', 'eatery', 'bistro', 'pub']
+                                    'cafe', 'food', 'eatery', 'bistro', 'pub']
                 for amenity in city_amenities:
                     if any(keyword in amenity.lower() for keyword in restaurant_keywords):
                         restaurant_count += 1
@@ -797,8 +797,24 @@ class LocationService:
                     closest_city = prioritized_cities[0]
                     result['regional_context'] = f"Property is {closest_city['distance']:.1f} miles from {closest_city['city']}"
 
-            if largest_cities:
-                largest_city = largest_cities[0]
+            # Find large cities for context - fixed by removing reference to undefined variable
+            large_cities = []
+            for city_data in prioritized_cities:
+                city_info = MAJOR_CITIES.get(city_data['city'], {})
+                population = city_info.get('population', 0)
+                if population > 25000:  # Consider cities with population over 25k as "large"
+                    large_cities.append({
+                        'city': city_data['city'],
+                        'distance': city_data['distance'],
+                        'distance_bucket': city_data['distance_bucket'],
+                        'population': population
+                    })
+
+            # Sort by population (largest first)
+            large_cities.sort(key=lambda x: x['population'], reverse=True)
+
+            if large_cities:
+                largest_city = large_cities[0]
                 city_info = MAJOR_CITIES.get(largest_city['city'], {})
 
                 # Store the large city data
@@ -813,9 +829,10 @@ class LocationService:
                 if 'raw' in result:
                     town_name = self._extract_town_name(result['raw'])
                 else:
-                    raw_location = result.get('state_full') or ''
+                    raw_location = result.get('location', '') or ''
                     location_parts = raw_location.split(',')
-                    town_name = location_parts[0].strip() if location_parts else None
+                    town_name = location_parts[0].strip(
+                    ) if location_parts else None
 
                 # Try to get actual town population if available
                 if town_name and town_name not in ['Location Unknown', 'Unknown']:
@@ -839,13 +856,15 @@ class LocationService:
                         )
                         result['is_estimated_population'] = True
                 else:
-                    # If we can't extract town name, use the city population as estimate
-                    result['town_population'] = city_info.get('population')
-                    result['town_pop_bucket'] = self.get_bucket(
-                        city_info.get('population', 0),
-                        POPULATION_BUCKETS
-                    )
-                    result['is_estimated_population'] = True
+                    # If we can't extract town name, use the largest city population as estimate
+                    if large_cities:
+                        result['town_population'] = large_cities[0].get(
+                            'population', 10000)
+                        result['town_pop_bucket'] = self.get_bucket(
+                            result['town_population'],
+                            POPULATION_BUCKETS
+                        )
+                        result['is_estimated_population'] = True
 
         except Exception as e:
             logger.error(f"Error adding enhanced amenities info: {str(e)}")

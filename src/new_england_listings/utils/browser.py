@@ -28,7 +28,6 @@ def generate_windows_properties():
         "mobile": False
     }
 
-
 def generate_mouse_tracks(start_x, start_y, end_x, end_y, points=10):
     """Generate natural-looking mouse movement tracks."""
     points = []
@@ -39,7 +38,6 @@ def generate_mouse_tracks(start_x, start_y, end_x, end_y, points=10):
         y = start_y + (end_y - start_y) * t + random.randint(-10, 10)
         points.append((int(x), int(y)))
     return points
-
 
 def get_stealth_driver() -> webdriver.Chrome:
     """Get a ChromeDriver instance with enhanced stealth for LandAndFarm."""
@@ -143,7 +141,6 @@ def get_stealth_driver() -> webdriver.Chrome:
 
     return driver
 
-
 async def get_page_content_async(url: str, use_selenium: bool = False, max_retries: int = 3, timeout: int = 30) -> BeautifulSoup:
     """
     Asynchronous wrapper for get_page_content.
@@ -165,7 +162,7 @@ async def get_page_content_async(url: str, use_selenium: bool = False, max_retri
     )
 
 def get_page_content(url: str, use_selenium: bool = False, max_retries: int = 3, timeout: int = 30) -> BeautifulSoup:
-    """Get page content with enhanced stealth and retry logic."""
+    """Get page content with enhanced stealth and retry logic using the driver manager."""
     logger.info(f"Starting page fetch for {url}")
 
     retry_count = 0
@@ -174,12 +171,14 @@ def get_page_content(url: str, use_selenium: bool = False, max_retries: int = 3,
     while retry_count < max_retries:
         try:
             if use_selenium:
-                logger.info("Using stealth Selenium...")
-                driver = get_stealth_driver()
+                logger.info("Using Selenium for dynamic content...")
+                # Use the driver manager instead of creating a new driver each time
+                driver = driver_manager.get_driver()
 
                 try:
                     # Initial delay
-                    time.sleep(random.uniform(2, 4))
+                    # Reduced delay when reusing driver
+                    time.sleep(random.uniform(1, 2))
 
                     # Navigate with referrer
                     logger.info("Navigating to page...")
@@ -201,7 +200,7 @@ def get_page_content(url: str, use_selenium: bool = False, max_retries: int = 3,
 
                     driver.get(url)
                     # Wait longer after initial load
-                    time.sleep(random.uniform(3, 5))
+                    time.sleep(random.uniform(2, 3))  # Reduced delay
 
                     # Check if we got a valid page
                     if "This site can't be reached" in driver.title:
@@ -228,7 +227,12 @@ def get_page_content(url: str, use_selenium: bool = False, max_retries: int = 3,
                         meta_tag = soup.new_tag("meta")
                         meta_tag["name"] = "extraction-status"
                         meta_tag["content"] = "blocked-but-attempting"
-                        soup.head.append(meta_tag)
+                        if soup.head:
+                            soup.head.append(meta_tag)
+                        else:
+                            head = soup.new_tag("head")
+                            soup.insert(0, head)
+                            soup.head.append(meta_tag)
 
                         # Try to extract from URL
                         parts = url.split('_')
@@ -240,8 +244,12 @@ def get_page_content(url: str, use_selenium: bool = False, max_retries: int = 3,
 
                     return soup
 
-                finally:
-                    driver.quit()
+                except Exception as e:
+                    logger.error(f"Error with Selenium: {str(e)}")
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        raise
+                    continue
 
             else:
                 # Regular requests with enhanced headers
@@ -379,3 +387,58 @@ def get_random_user_agent() -> str:
     return random.choice(user_agents)
 
 get_selenium_driver = get_stealth_driver
+
+class DriverManager:
+    """Singleton manager for Chrome WebDriver instances."""
+
+    _instance = None
+    _driver = None
+    _last_used = 0
+    _max_idle_time = 300  # 5 minutes
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(DriverManager, cls).__new__(cls)
+        return cls._instance
+
+    def get_driver(self):
+        """Get an existing driver or create a new one if needed."""
+        current_time = time.time()
+
+        # Check if we have an existing driver that hasn't timed out
+        if self._driver is not None:
+            # If driver is idle for too long, quit and create a new one
+            if current_time - self._last_used > self._max_idle_time:
+                logger.info("Driver idle timeout reached, creating new driver")
+                self.quit_driver()
+            else:
+                logger.debug("Reusing existing WebDriver instance")
+                self._last_used = current_time
+                return self._driver
+
+        # Create a new driver
+        logger.info("Creating new WebDriver instance")
+        self._driver = get_stealth_driver()
+        self._last_used = current_time
+        return self._driver
+
+    def quit_driver(self):
+        """Quit the current driver if it exists."""
+        if self._driver is not None:
+            try:
+                self._driver.quit()
+            except Exception as e:
+                logger.warning(f"Error quitting driver: {str(e)}")
+            finally:
+                self._driver = None
+
+
+# Create a singleton instance
+driver_manager = DriverManager()
+
+# When application is shutting down, make sure to quit the driver
+
+
+def cleanup_driver():
+    """Cleanup the WebDriver when application is shutting down."""
+    driver_manager.quit_driver()
