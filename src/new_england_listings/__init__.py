@@ -54,6 +54,7 @@ __all__ = [
     "FarmlandExtractor",
     "LandSearchExtractor",
     "FarmLinkExtractor",
+    "ZillowExtractor"
 
     # Logging
     "configure_logging",
