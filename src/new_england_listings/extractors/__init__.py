@@ -15,6 +15,7 @@ from .farmland import FarmlandExtractor
 from .landsearch import LandSearchExtractor
 from .farmlink import FarmLinkExtractor
 from .landwatch import LandWatchExtractor
+from .zillow import ZillowExtractor 
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +44,10 @@ def get_extractor_for_url(url: str) -> Optional[BaseExtractor]:
         return RealtorExtractor(url)
     elif any(x in domain for x in ["mainefarmlandtrust.org", "newenglandfarmlandfinder.org"]):
         return FarmlandExtractor(url)
-    elif "landwatch.com" in domain:  # Add support for landwatch.com
+    elif "landwatch.com" in domain:
         return LandWatchExtractor(url)
+    elif "zillow.com" in domain:
+        return ZillowExtractor(url)
 
     logger.warning(f"No extractor available for domain: {domain}")
     return None
@@ -58,5 +61,6 @@ __all__ = [
     "LandSearchExtractor",
     "FarmLinkExtractor",
     "LandWatchExtractor",
+    "ZillowExtractor", 
     "get_extractor_for_url"
 ]

@@ -162,8 +162,14 @@ async def get_page_content_async(url: str, use_selenium: bool = False, max_retri
     )
 
 def get_page_content(url: str, use_selenium: bool = False, max_retries: int = 3, timeout: int = 30) -> BeautifulSoup:
-    """Get page content with enhanced stealth and retry logic using the driver manager."""
+    """Get page content with enhanced stealth and retry logic."""
     logger.info(f"Starting page fetch for {url}")
+
+    # Special handling for Zillow
+    is_zillow = "zillow.com" in url.lower()
+    if is_zillow:
+        logger.info("Using enhanced Zillow-specific browser configuration")
+        return get_zillow_content(url, timeout)
 
     retry_count = 0
     blocking_detected = False
@@ -278,6 +284,123 @@ def get_page_content(url: str, use_selenium: bool = False, max_retries: int = 3,
             time.sleep(random.uniform(5, 10) * retry_count)
 
     raise Exception(f"Failed to fetch page after {max_retries} attempts")
+
+def get_zillow_content(url: str, timeout: int = 60) -> BeautifulSoup:
+    """Get Zillow content with enhanced anti-detection measures."""
+    driver = None
+    try:
+        options = Options()
+
+        # These settings help avoid detection
+        options.add_argument('--disable-blink-features=AutomationControlled')
+        options.add_experimental_option(
+            "excludeSwitches", ["enable-automation"])
+        options.add_experimental_option('useAutomationExtension', False)
+
+        # Add realistic window size and user agent
+        options.add_argument("--window-size=1920,1080")
+        options.add_argument("--start-maximized")
+
+        # Use a very realistic user agent
+        user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        options.add_argument(f'user-agent={user_agent}')
+
+        # We need JS and images for Zillow to work correctly
+        prefs = {
+            'profile.default_content_setting_values': {
+                'images': 1,
+                'javascript': 1,
+                'cookies': 1,
+            }
+        }
+        options.add_experimental_option('prefs', prefs)
+
+        # Zillow works better with visible browser for testing
+        # Comment this for production use
+        # options.add_argument('--headless=new')
+
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=options)
+        driver.set_page_load_timeout(timeout)
+
+        # Set CDP commands for additional stealth
+        driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+            "userAgent": user_agent,
+            "platform": "macOS",
+            "acceptLanguage": "en-US,en;q=0.9",
+        })
+
+        # Important: Add special script to avoid detection
+        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+            "source": """
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+            window.chrome = { runtime: {} };
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [1, 2, 3, 4, 5]
+            });
+            """
+        })
+
+        # Visit a normal site first, then go to Zillow
+        driver.get("https://www.google.com")
+        time.sleep(2)
+
+        # Now navigate to the actual Zillow page
+        logger.info(f"Navigating to Zillow page: {url}")
+        driver.get(url)
+
+        # Wait for critical elements to load
+        logger.info("Waiting for page to fully load...")
+
+        # Wait longer for Zillow's complex JS to execute
+        time.sleep(5)
+
+        # Try to find price element - this is key for Zillow pages
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, "[data-testid='price']"))
+            )
+            logger.info("Price element found - page loaded successfully")
+        except:
+            logger.warning("Price element not found - page may be incomplete")
+
+        # Extract the page source
+        html = driver.page_source
+
+        # Check for blocking content
+        if "captcha" in html.lower() or "security check" in html.lower():
+            logger.warning(
+                "Detected CAPTCHA or security check - Zillow is blocking the request")
+
+            # Optionally, save a screenshot for debugging
+            try:
+                driver.save_screenshot("zillow_blocked.png")
+                logger.info("Saved screenshot to zillow_blocked.png")
+            except:
+                pass
+
+        # Return the soup object
+        return BeautifulSoup(html, 'html.parser')
+
+    except Exception as e:
+        logger.error(f"Error getting Zillow content: {str(e)}")
+        # If we have a driver but failed, try to get whatever HTML we have
+        if driver:
+            try:
+                return BeautifulSoup(driver.page_source, 'html.parser')
+            except:
+                pass
+        return BeautifulSoup("<html><body>Failed to load</body></html>", 'html.parser')
+
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except:
+                pass
 
 def wait_for_load(driver: webdriver.Chrome, timeout: int = 90) -> bool:
     """Wait for page to load with enhanced checks."""

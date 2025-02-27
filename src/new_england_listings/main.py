@@ -45,7 +45,7 @@ def needs_selenium(url: str) -> bool:
         "newenglandfarmlandfinder.org",
         "landsearch.com",
         "landandfarm.com",
-        "zillow.com",
+        "zillow.com", 
         "farmlink.mainefarmlandtrust.org"
     ]
     return any(domain in url.lower() for domain in selenium_domains)

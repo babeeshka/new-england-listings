@@ -9,9 +9,11 @@ from .landandfarm import LandAndFarmExtractor
 from .farmland import FarmlandExtractor
 from .landsearch import LandSearchExtractor
 from .farmlink import FarmLinkExtractor
+from .zillow import ZillowExtractor
 import logging
 
 logger = logging.getLogger(__name__)
+
 
 def get_extractor_for_url(url: str) -> Optional[Type[BaseExtractor]]:
     """Get the appropriate extractor class for a given URL."""
@@ -37,6 +39,9 @@ def get_extractor_for_url(url: str) -> Optional[Type[BaseExtractor]]:
     elif "newenglandfarmlandfinder.org" in domain:
         logger.info("Using FarmlandExtractor for NEFF listing")
         return FarmlandExtractor
+    elif "zillow.com" in domain:
+        logger.info("Using ZillowExtractor for Zillow listing")
+        return ZillowExtractor
 
     logger.warning(f"No matching extractor found for domain: {domain}")
     return None
@@ -68,6 +73,7 @@ def get_domain_type(url: str) -> str:
     domain = urlparse(url).netloc.lower()
 
     DOMAIN_TYPES = {
+        # Add zillow.com to realtor type
         "realtor": ["realtor.com", "zillow.com", "trulia.com"],
         "farm": ["mainefarmlandtrust.org", "newenglandfarmlandfinder.org"],
         "land": ["landandfarm.com", "landsearch.com", "landwatch.com"],
@@ -99,7 +105,8 @@ def clean_url(url: str) -> str:
         'listingId',
         'propertyId',
         'mls',
-        'farm-id'
+        'farm-id',
+        'zpid'
     ]
 
     # Remove fragments
@@ -136,7 +143,8 @@ def extract_listing_id(url: str) -> Optional[str]:
         r'(?:property|listing|home)[/-](\w+)/?$',  # general pattern
         r'farm-id-(\d+)',  # farmland pattern
         r'MLS-(\w+)',      # MLS pattern
-        r'_(\w+)_[A-Z]{2}'  # realtor.com pattern
+        r'_(\w+)_[A-Z]{2}',  # realtor.com pattern
+        r'(\d+)_zpid'      # Zillow pattern
     ]
 
     for pattern in id_patterns:
@@ -149,7 +157,7 @@ def extract_listing_id(url: str) -> Optional[str]:
     if parsed.query:
         from urllib.parse import parse_qs
         params = parse_qs(parsed.query)
-        for key in ['id', 'listingId', 'propertyId', 'farm-id']:
+        for key in ['id', 'listingId', 'propertyId', 'farm-id', 'zpid']:
             if key in params:
                 return params[key][0]
 

@@ -16,7 +16,8 @@ from .extractors import (
     LandAndFarmExtractor,
     FarmlandExtractor,
     LandSearchExtractor,
-    FarmLinkExtractor
+    FarmLinkExtractor,
+    ZillowExtractor
 )
 
 __version__ = "0.2.0"

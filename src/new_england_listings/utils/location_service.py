@@ -615,7 +615,7 @@ class LocationService:
     def _add_enhanced_amenities_info(self, result: Dict[str, Any], nearest_cities: List[Dict[str, Any]], property_state: str = None):
         """Add enhanced amenities information to the location result with more geographic context and deduplication."""
         try:
-            # Filter cities to prioritize those in the same state if specified
+            # 1. PRIORITIZE CITIES IN THE SAME STATE
             prioritized_cities = nearest_cities
             if property_state:
                 same_state_cities = [
@@ -624,7 +624,7 @@ class LocationService:
                     prioritized_cities = same_state_cities + \
                         [city for city in nearest_cities if city not in same_state_cities]
 
-            # Check for hospitals
+            # 2. HOSPITAL INFORMATION
             hospitals = []
             for city_data in prioritized_cities:
                 city = city_data['city']
@@ -650,7 +650,7 @@ class LocationService:
                     result['closest_hospital'] = f"{result['nearest_city']} Medical Center"
                     result['hospital_distance_bucket'] = result['nearest_city_distance_bucket']
 
-            # Check for schools
+            # 3. SCHOOL INFORMATION
             schools = []
             for city_data in prioritized_cities:
                 city = city_data['city']
@@ -701,7 +701,7 @@ class LocationService:
                     result['school_rating'] = 6.0  # Default "average" rating
                     result['school_rating_cat'] = "Average (6-7)"
 
-            # Collect amenities from nearest cities
+            # 4. COLLECT AMENITIES AND ESTIMATE RESTAURANT/GROCERY COUNTS
             all_amenities = set()  # Use a set to automatically deduplicate
             grocery_count = 0
             restaurant_count = 0
@@ -716,7 +716,7 @@ class LocationService:
                 # Add unique amenities to the set (automatically deduplicates)
                 all_amenities.update(city_amenities)
 
-                # More comprehensive keyword matching for restaurants
+                # Check for restaurants
                 restaurant_keywords = ['restaurant', 'dining',
                                     'cafe', 'food', 'eatery', 'bistro', 'pub']
                 for amenity in city_amenities:
@@ -724,9 +724,8 @@ class LocationService:
                         restaurant_count += 1
                         break
 
-                # If no explicit restaurant mentions, estimate based on city size
+                # Estimate restaurants based on city size if none found
                 if restaurant_count == 0:
-                    # Base estimate on population (larger cities have more restaurants)
                     if population > 50000:
                         restaurant_count += 5
                     elif population > 25000:
@@ -736,7 +735,7 @@ class LocationService:
                     elif population > 5000:
                         restaurant_count += 1
 
-                # More comprehensive keyword matching for grocery stores
+                # Check for grocery stores
                 grocery_keywords = ['grocery', 'market',
                                     'shopping', 'supermarket', 'store', 'mall']
                 for amenity in city_amenities:
@@ -744,9 +743,8 @@ class LocationService:
                         grocery_count += 1
                         break
 
-                # If no explicit grocery mentions, estimate based on city size
+                # Estimate grocery stores based on city size if none found
                 if grocery_count == 0:
-                    # Base estimate on population (larger cities have more grocery stores)
                     if population > 50000:
                         grocery_count += 3
                     elif population > 25000:
@@ -754,8 +752,7 @@ class LocationService:
                     elif population > 5000:
                         grocery_count += 1
 
-            # Always provide non-null values for restaurant and grocery counts
-            # Even if detection failed, use city population as a fallback
+            # Set default values if estimates are still zero
             if restaurant_count == 0 and prioritized_cities:
                 closest_city = prioritized_cities[0]
                 city_info = MAJOR_CITIES.get(closest_city['city'], {})
@@ -782,22 +779,21 @@ class LocationService:
                 else:
                     grocery_count = 1
 
-            # Add counts to result (always non-null)
+            # Add counts to result
             result['restaurants_nearby'] = restaurant_count
             result['grocery_stores_nearby'] = grocery_count
 
-            # Create a list of all unique amenities (already deduplicated by using a set)
+            # Add amenities
             if all_amenities:
-                # Convert set to list and limit to 7 amenities
                 unique_amenities = list(all_amenities)
                 result['other_amenities'] = " | ".join(unique_amenities[:7])
 
-                # Add regional context
-                if prioritized_cities and 'regional_context' not in result:
-                    closest_city = prioritized_cities[0]
-                    result['regional_context'] = f"Property is {closest_city['distance']:.1f} miles from {closest_city['city']}"
+            # Add regional context
+            if prioritized_cities and 'regional_context' not in result:
+                closest_city = prioritized_cities[0]
+                result['regional_context'] = f"Property is {closest_city['distance']:.1f} miles from {closest_city['city']}"
 
-            # Find large cities for context - fixed by removing reference to undefined variable
+            # 5. IDENTIFY LARGE CITIES AND EXTRACT TOWN POPULATION
             large_cities = []
             for city_data in prioritized_cities:
                 city_info = MAJOR_CITIES.get(city_data['city'], {})
@@ -825,7 +821,7 @@ class LocationService:
                     'major_city_population': city_info.get('population')
                 })
 
-                # Extract the actual town name from the location
+                # Extract town name from location
                 if 'raw' in result:
                     town_name = self._extract_town_name(result['raw'])
                 else:
@@ -834,7 +830,7 @@ class LocationService:
                     town_name = location_parts[0].strip(
                     ) if location_parts else None
 
-                # Try to get actual town population if available
+                # 6. GET TOWN POPULATION DATA
                 if town_name and town_name not in ['Location Unknown', 'Unknown']:
                     # Try to get population data for this specific town
                     town_pop = self._get_town_population(town_name, property_state)
@@ -847,24 +843,31 @@ class LocationService:
                         # Flag that this is actual town data, not estimated
                         result['is_actual_town_data'] = True
                     else:
-                        # Fallback to estimate based on town type
-                        result['town_population'] = self._estimate_town_population(
-                            town_name)
+                        # Use a reasonable default for small towns
+                        default_town_pop = 5000  # More reasonable default for small towns
+                        result['town_population'] = default_town_pop
                         result['town_pop_bucket'] = self.get_bucket(
-                            result['town_population'],
+                            default_town_pop,
                             POPULATION_BUCKETS
                         )
                         result['is_estimated_population'] = True
+                        result['population_note'] = "Estimated small town population"
                 else:
-                    # If we can't extract town name, use the largest city population as estimate
-                    if large_cities:
-                        result['town_population'] = large_cities[0].get(
-                            'population', 10000)
-                        result['town_pop_bucket'] = self.get_bucket(
-                            result['town_population'],
-                            POPULATION_BUCKETS
-                        )
-                        result['is_estimated_population'] = True
+                    # If we can't extract town name, use a reasonable default
+                    default_town_pop = 5000
+                    result['town_population'] = default_town_pop
+                    result['town_pop_bucket'] = self.get_bucket(
+                        default_town_pop,
+                        POPULATION_BUCKETS
+                    )
+                    result['is_estimated_population'] = True
+                    result['population_note'] = "Default town population estimate"
+
+            # 7. ENSURE CONSISTENT OUTPUT
+            if 'restaurants_nearby' not in result:
+                result['restaurants_nearby'] = 1
+            if 'grocery_stores_nearby' not in result:
+                result['grocery_stores_nearby'] = 1
 
         except Exception as e:
             logger.error(f"Error adding enhanced amenities info: {str(e)}")
@@ -907,11 +910,20 @@ class LocationService:
             "Bangor": 31903,
             "Lewiston": 36592,
             "Augusta": 18899,
-            "Casco": 3742,  # Updated with accurate data
+            "Casco": 3742,
             "Brunswick": 20278,
             "Biddeford": 21362,
             "South Portland": 25532,
-            "Saco": 20381
+            "Saco": 20381,
+            "Waldoboro": 5075,  # Added Waldoboro
+            "Camden": 4850,
+            "Rockland": 7175,
+            "Belfast": 6700,
+            "Damariscotta": 2218,
+            "Wiscasset": 3700,
+            "Bath": 8335,
+            "Boothbay": 3120,
+            "Farmington": 7760
         }
 
         # Default town sizes based on state if no specific data
@@ -928,13 +940,17 @@ class LocationService:
         if state_code == "ME" and town_name in maine_towns:
             return maine_towns[town_name]
 
-        # More comprehensive lookup would go here
+        # Check for partial match
+        if state_code == "ME":
+            for known_town in maine_towns:
+                if known_town.lower() in town_name.lower():
+                    return maine_towns[known_town]
 
         # Default fall back to small town estimate based on state
         if state_code in small_towns:
             return small_towns[state_code]
 
-        return None
+        return 5000  # Default small town population
 
     def _estimate_town_population(self, town_name: str) -> int:
         """Provide a reasonable population estimate for unknown towns."""

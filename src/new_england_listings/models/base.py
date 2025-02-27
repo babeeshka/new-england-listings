@@ -1,7 +1,7 @@
 # src/new_england_listings/models/base.py
 
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, validator, HttpUrl
+from pydantic import BaseModel, Field, field_validator, validator, HttpUrl
 from datetime import datetime
 from enum import Enum
 
@@ -115,20 +115,23 @@ class PropertyListing(BaseModel):
     # Raw data for debugging
     raw_data: Dict[str, Any] = Field(default_factory=dict)
 
-    @validator('platform')
+
+    @field_validator('platform')
     def validate_platform(cls, v):
         valid_platforms = {
             "LandSearch",
             "Land and Farm",
             "Maine Farmland Trust",
             "New England Farmland Finder",
-            "Realtor.com"
+            "Realtor.com",
+            "Zillow",  # Add Zillow as a valid platform
+            "LandWatch"
         }
         if v not in valid_platforms:
             raise ValueError(f'Invalid platform: {v}')
         return v
 
-    @validator('price')
+    @field_validator('price')
     def validate_price(cls, v):
         if not v:
             return "Contact for Price"
@@ -139,13 +142,13 @@ class PropertyListing(BaseModel):
                 'Price must contain numbers or be "Contact for Price"')
         return v
 
-    @validator('school_rating')
+    @field_validator('school_rating')
     def validate_school_rating(cls, v):
         if v is not None and (v < 0 or v > 10):
             raise ValueError('School rating must be between 0 and 10')
         return v
 
-    @validator('distance_to_portland')
+    @field_validator('distance_to_portland')
     def validate_distance(cls, v):
         if v is not None and v < 0:
             raise ValueError('Distance cannot be negative')
