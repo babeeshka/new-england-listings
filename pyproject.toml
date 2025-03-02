@@ -18,7 +18,10 @@ addopts = "-v --tb=short"
 markers = [
     "integration: marks tests that make actual API calls (deselect with '-m \"not integration\"')",
     "slow: marks tests that are slow to execute (deselect with '-m \"not slow\"')",
-    "unit: marks unit tests (select with '-m unit')"
+    "unit: marks unit tests (select with '-m unit')",
+    "performance: marks performance benchmark tests that measure execution time",
+    "property: marks property-based tests using hypothesis",
+    "regression: marks regression tests that verify fixed bugs stay fixed"
 ]
 
 # Filtering

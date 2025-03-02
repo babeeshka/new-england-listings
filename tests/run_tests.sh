@@ -57,8 +57,7 @@ while [[ $# -gt 0 ]]; do
       echo "  -p, --path PATH       Specify test path (default: tests/)"
       echo "  -o, --output-dir DIR  Specify output directory (default: test_results)"
       echo "  -t, --test PATTERN    Run specific tests (e.g., 'test_realtor' or 'test_utils/test_text.py')"
-      echo "  -m, --marker MARKER   Run tests with specific marker (e.g., 'integration')"
-      echo "  -h, --help            Show this help message"
+      echo "  -m, --marker MARKER   Run tests with specific marker (e.g., 'integration', 'performance', 'property')"      echo "  -h, --help            Show this help message"
       exit 0
       ;;
     *)

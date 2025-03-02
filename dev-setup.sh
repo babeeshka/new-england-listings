@@ -61,6 +61,10 @@ fi
 echo "Installing dependencies..."
 python -m pip install --upgrade pip setuptools wheel
 
+# Install additional test dependencies
+echo "Installing test dependencies..."
+pip install pytest pytest-cov pytest-xdist pytest-asyncio hypothesis memory_profiler
+
 # Install package in editable mode with dev dependencies
 pip install -e ".[dev]"
 

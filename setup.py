@@ -21,6 +21,9 @@ setup(
         "dev": [
             "pytest>=6.0",
             "pytest-cov>=2.0",
+            "pytest-asyncio>=0.14.0",
+            "hypothesis>=6.0.0",
+            "memory_profiler>=0.60.0",
             "black>=21.0",
             "isort>=5.0",
             "flake8>=3.9",
