@@ -139,149 +139,94 @@ class ZillowExtractor(BaseExtractor):
 
         return False
 
-    def _extract_location_from_url(self) -> Optional[str]:
-        """Extract location from URL when other methods fail."""
-        try:
-            # Extract from URL path pattern: /homedetails/534-Reef-Rd-Waldoboro-ME-04572/224599069_zpid
-            path_parts = urlparse(self.url).path.split('/')
-            if len(path_parts) > 2:
-                address_part = path_parts[2]  # Get the address slug
+    def _verify_page_content(self) -> bool:
+        """Verify the page content was properly loaded."""
+        # First extract any structured data we can find
+        self.property_data = self._extract_json_data()
 
-                # Try to find STATE-ZIP pattern (like ME-04572)
-                state_zip_match = re.search(
-                    r'-([A-Z]{2})-(\d{5})', address_part)
-                if state_zip_match:
-                    state = state_zip_match.group(1)
+        # Check for Zillow blocking indicators
+        page_text = self.soup.get_text().lower()
+        blocking_indicators = [
+            "captcha",
+            "security check",
+            "please verify",
+            "suspicious activity",
+            "unusual traffic"
+        ]
 
-                    # Find the town/city before the state
-                    town_pattern = r'-([\w-]+)-' + state
-                    town_match = re.search(town_pattern, address_part)
+        if any(indicator in page_text for indicator in blocking_indicators):
+            logger.warning("Detected blocking content on Zillow")
+            # We'll continue anyway and rely on URL-based extraction as fallback
 
-                    if town_match:
-                        town = town_match.group(1).replace('-', ' ').title()
-                        return f"{town}, {state}"
+        # If we have property_data, consider the page valid
+        if self.property_data:
+            return True
 
-                # Fallback: try simpler pattern for just State
-                simpler_match = re.search(
-                    r'-([\w-]+)-([A-Z]{2})', address_part)
-                if simpler_match:
-                    town = simpler_match.group(1).replace('-', ' ').title()
-                    state = simpler_match.group(2)
-                    return f"{town}, {state}"
+        # Otherwise check for essential page elements
+        price_elem = self.soup.select_one(
+            ZILLOW_SELECTORS["summary"]["price"]["selector"])
+        address_elem = self.soup.select_one(
+            ZILLOW_SELECTORS["summary"]["address"]["selector"])
 
-            return None
-        except Exception as e:
-            logger.debug(f"Error extracting location from URL: {e}")
-            return None
+        return bool(price_elem or address_elem or self.zpid)
 
     def _extract_listing_name_from_url(self) -> str:
         """Generate a listing name from URL."""
         try:
-            path_parts = urlparse(self.url).path.split('/')
-            if len(path_parts) > 2:
-                address_slug = path_parts[2]  # /homedetails/[address-slug]/
+                path_parts = urlparse(self.url).path.split('/')
+                if len(path_parts) > 2:
+                    # /homedetails/[address-slug]/
+                    address_slug = path_parts[2]
 
-                # Convert hyphenated address to readable format
-                readable = address_slug.replace('-', ' ').title()
+                    # Convert hyphenated address to readable format
+                    readable = address_slug.replace('-', ' ').title()
 
-                # Clean up any trailing numbers
-                readable = re.sub(r'\s\d+\s?$', '', readable)
+                    # Clean up any trailing numbers
+                    readable = re.sub(r'\s\d+\s?$', '', readable)
 
-                return readable
+                    return readable
 
-            return f"Zillow Property {self.zpid}" if self.zpid else "Untitled Zillow Listing"
+                return f"Zillow Property {self.zpid}" if self.zpid else "Untitled Zillow Listing"
         except Exception as e:
             logger.debug(f"Error extracting listing name from URL: {e}")
             return f"Zillow Property {self.zpid}" if self.zpid else "Untitled Zillow Listing"
 
-    # These abstract methods MUST BE IMPLEMENTED - they were indented incorrectly
     def extract_listing_name(self) -> str:
-        """Extract the listing name/title."""
-        try:
-            # Try to get from JSON data first
-            if self.property_data:
-                address = self.property_data.get('address', {})
-                street = address.get('streetAddress', '')
-                city = address.get('city', '')
-                state = address.get('state', '')
-                zip_code = address.get('zipcode', '')
+            """Extract the listing name/title."""
+            try:
+                # Try to get from JSON data first
+                if self.property_data:
+                    address = self.property_data.get('address', {})
+                    street = address.get('streetAddress', '')
+                    city = address.get('city', '')
+                    state = address.get('state', '')
+                    zip_code = address.get('zipcode', '')
 
-                if street and city and state:
-                    return f"{street}, {city}, {state} {zip_code}".strip()
+                    if street and city and state:
+                        return f"{street}, {city}, {state} {zip_code}".strip()
 
-            # Try to get from address element
-            address_elem = self.soup.select_one(
-                ZILLOW_SELECTORS["summary"]["address"]["selector"])
-            if address_elem:
-                return TextProcessor.clean_html_text(address_elem.text)
+                # Try to get from address element
+                address_elem = self.soup.select_one(
+                    ZILLOW_SELECTORS["summary"]["address"]["selector"])
+                if address_elem:
+                    return TextProcessor.clean_html_text(address_elem.text)
 
-            # Try any h1 element
-            h1 = self.soup.find("h1")
-            if h1:
-                return TextProcessor.clean_html_text(h1.text)
+                # Try any h1 element
+                h1 = self.soup.find("h1")
+                if h1:
+                    return TextProcessor.clean_html_text(h1.text)
 
-            # Try to extract from URL
-            path_parts = urlparse(self.url).path.split('/')
-            if len(path_parts) > 2:
-                address_part = path_parts[2]  # /homedetails/[address-slug]/
-                return address_part.replace('-', ' ').title()
+                # Try to extract from URL
+                path_parts = urlparse(self.url).path.split('/')
+                if len(path_parts) > 2:
+                    address_part = path_parts[2]  # /homedetails/[address-slug]/
+                    return address_part.replace('-', ' ').title()
 
-            return f"Zillow Property {self.zpid}" if self.zpid else "Untitled Zillow Listing"
+                return f"Zillow Property {self.zpid}" if self.zpid else "Untitled Zillow Listing"
 
-        except Exception as e:
-            logger.error(f"Error extracting listing name: {str(e)}")
-            return f"Zillow Property {self.zpid}" if self.zpid else "Untitled Zillow Listing"
-
-    def extract_location(self) -> str:
-        """Extract location with enhanced validation."""
-        try:
-            # Try to extract from JSON data first
-            if self.property_data:
-                address = self.property_data.get('address', {})
-                city = address.get('city', '')
-                state = address.get('state', '')
-                zip_code = address.get('zipcode', '')
-
-                if city and state:
-                    location = f"{city}, {state}"
-                    if zip_code:
-                        location += f" {zip_code}"
-                    return location
-
-            # Try address element
-            address_elem = self.soup.select_one(
-                ZILLOW_SELECTORS["summary"]["address"]["selector"])
-            if address_elem:
-                address_text = TextProcessor.clean_html_text(address_elem.text)
-                # Try to extract city, state from full address
-                location_match = re.search(
-                    r'([^,]+),\s*([A-Z]{2})', address_text)
-                if location_match:
-                    return f"{location_match.group(1)}, {location_match.group(2)}"
-                return address_text
-
-            # Try meta tags
-            meta_location = self.soup.find("meta", {"property": "og:locality"})
-            meta_region = self.soup.find("meta", {"property": "og:region"})
-            if meta_location and meta_region:
-                return f"{meta_location['content']}, {meta_region['content']}"
-
-            # Try extracting from URL
-            path_parts = urlparse(self.url).path.split('/')
-            if len(path_parts) > 2:
-                address_part = path_parts[2]  # /homedetails/[address-slug]/
-                location_match = re.search(
-                    r'([A-Za-z-]+)-([A-Z]{2})-\d+$', address_part)
-                if location_match:
-                    city = location_match.group(1).replace('-', ' ').title()
-                    state = location_match.group(2).upper()
-                    return f"{city}, {state}"
-
-            return "Location Unknown"
-
-        except Exception as e:
-            logger.error(f"Error extracting location: {str(e)}")
-            return "Location Unknown"
+            except Exception as e:
+                logger.error(f"Error extracting listing name: {str(e)}")
+                return f"Zillow Property {self.zpid}" if self.zpid else "Untitled Zillow Listing"
 
     def extract_price(self) -> Tuple[str, str]:
         """Extract price with enhanced pattern matching."""
@@ -432,14 +377,290 @@ class ZillowExtractor(BaseExtractor):
                             ) != 'acres' else " acres"
                             return self.text_processor.standardize_acreage(f"{lot_size}{unit_str}")
 
-            # ...rest of acreage extraction logic...
-            # [The rest of your existing extract_acreage_info method would go here - I'm truncating for brevity]
+            # STRATEGY 2: Use Fact categories from HTML
+            lot_section_selectors = [
+                # Headers or section titles that might contain lot information
+                'h6:-soup-contains("Lot")',
+                '.ds-data-heading:-soup-contains("Lot")',
+                '.ds-section-title:-soup-contains("Lot")',
+                '.dFhjAe',  # Class from the example you shared
+                '.Text-c11n-8-99-3__sc-aiai24-0:-soup-contains("Lot")',
+                # Parent sections
+                'section[data-testid="lot-section"]',
+                '[data-testid="facts-section"]'
+            ]
+
+            for selector in lot_section_selectors:
+                try:
+                    section = self.soup.select_one(selector)
+                    if section:
+                        # Look for size within this section - first try list items
+                        list_items = section.find_all('li')
+                        for li in list_items:
+                            li_text = li.get_text().lower()
+                            if 'size' in li_text and ('acre' in li_text or 'acres' in li_text):
+                                # Extract acreage from the list item
+                                acre_match = re.search(
+                                    r'(\d+(?:\.\d+)?)\s*acres?', li_text)
+                                if acre_match:
+                                    return self.text_processor.standardize_acreage(f"{acre_match.group(1)} acres")
+
+                        # If list items don't work, try the whole section text
+                        section_text = section.get_text().lower()
+                        acre_match = re.search(
+                            r'(\d+(?:\.\d+)?)\s*acres?', section_text)
+                        if acre_match:
+                            return self.text_processor.standardize_acreage(f"{acre_match.group(1)} acres")
+
+                        # Try square feet pattern and convert to acres
+                        sqft_match = re.search(
+                            r'(\d+(?:,\d+)?)\s*(?:sq\.?\s*ft\.?|square\s*feet)', section_text)
+                        if sqft_match:
+                            try:
+                                sqft = float(sqft_match.group(1).replace(',', ''))
+                                acres = sqft / 43560
+                                return self.text_processor.standardize_acreage(f"{acres:.2f} acres")
+                            except (ValueError, TypeError):
+                                pass
+                except Exception:
+                    continue
+
+            # STRATEGY 3: Search whole page text for acre mentions
+            # First look in Facts sections
+            facts_section = self.soup.select_one(
+                ZILLOW_SELECTORS["summary"]["facts"]["selector"])
+            if facts_section:
+                facts_text = facts_section.get_text().lower()
+
+                # Look for acre patterns
+                acre_patterns = [
+                    r'(\d+(?:\.\d+)?)\s*acres?',
+                    r'lot\s*(?:size)?:?\s*(\d+(?:\.\d+)?)\s*acres?',
+                    r'lot\s*size:?\s*(\d+(?:,\d+)?)\s*sq\s*\.?\s*ft\.'
+                ]
+
+                for pattern in acre_patterns:
+                    match = re.search(pattern, facts_text)
+                    if match:
+                        # Convert sqft to acres if needed
+                        if 'sq' in pattern:
+                            try:
+                                sqft = float(match.group(1).replace(',', ''))
+                                acres = sqft / 43560
+                                return self.text_processor.standardize_acreage(f"{acres:.2f} acres")
+                            except (ValueError, TypeError):
+                                pass
+                        else:
+                            return self.text_processor.standardize_acreage(f"{match.group(1)} acres")
+
+            # STRATEGY 4: Search full page for lot sizes
+            full_text = self.soup.get_text().lower()
+
+            # Look specifically for patterns likely to indicate lot size
+            lot_size_patterns = [
+                r'lot\s*size:?\s*(\d+(?:\.\d+)?)\s*acres?',
+                r'(\d+(?:\.\d+)?)\s*acres?\s*lot',
+                r'property\s*size:?\s*(\d+(?:\.\d+)?)\s*acres?',
+                r'land\s*size:?\s*(\d+(?:\.\d+)?)\s*acres?',
+                # The pattern from your example: "Size: 78 Acres"
+                r'size:?\s*(\d+(?:\.\d+)?)\s*acres?'
+            ]
+
+            for pattern in lot_size_patterns:
+                match = re.search(pattern, full_text)
+                if match:
+                    return self.text_processor.standardize_acreage(f"{match.group(1)} acres")
+
+            # As a last resort, search for any mention of acres
+            acres_match = re.search(r'(\d+(?:\.\d+)?)\s*acres?', full_text)
+            if acres_match:
+                return self.text_processor.standardize_acreage(f"{acres_match.group(1)} acres")
 
             return "Not specified", "Unknown"
 
         except Exception as e:
             logger.error(f"Error extracting acreage: {str(e)}")
             return "Not specified", "Unknown"
+
+    def _extract_location_from_url(self) -> Optional[str]:
+        """Extract location from URL when other methods fail."""
+        try:
+                # Extract from URL path pattern: /homedetails/534-Reef-Rd-Waldoboro-ME-04572/224599069_zpid
+                path_parts = urlparse(self.url).path.split('/')
+                if len(path_parts) > 2:
+                    address_part = path_parts[2]  # Get the address slug
+
+                    # Try to find STATE-ZIP pattern (like ME-04572)
+                    state_zip_match = re.search(
+                        r'-([A-Z]{2})-(\d{5})', address_part)
+                    if state_zip_match:
+                        state = state_zip_match.group(1)
+
+                        # Find the town/city before the state
+                        town_pattern = r'-([\w-]+)-' + state
+                        town_match = re.search(town_pattern, address_part)
+
+                        if town_match:
+                            town = town_match.group(1).replace('-', ' ').title()
+                            return f"{town}, {state}"
+
+                    # Fallback: try simpler pattern for just State
+                    simpler_match = re.search(
+                        r'-([\w-]+)-([A-Z]{2})', address_part)
+                    if simpler_match:
+                        town = simpler_match.group(1).replace('-', ' ').title()
+                        state = simpler_match.group(2)
+                        return f"{town}, {state}"
+
+                return None
+        except Exception as e:
+            logger.debug(f"Error extracting location from URL: {e}")
+            return None
+
+    def extract_location(self) -> str:
+        """Extract location with enhanced validation."""
+        try:
+                # Try to extract from JSON data first
+                if self.property_data:
+                    address = self.property_data.get('address', {})
+                    city = address.get('city', '')
+                    state = address.get('state', '')
+                    zip_code = address.get('zipcode', '')
+
+                    if city and state:
+                        location = f"{city}, {state}"
+                        if zip_code:
+                            location += f" {zip_code}"
+                        return location
+
+                # Try address element
+                address_elem = self.soup.select_one(
+                    ZILLOW_SELECTORS["summary"]["address"]["selector"])
+                if address_elem:
+                    address_text = TextProcessor.clean_html_text(address_elem.text)
+                    # Try to extract city, state from full address
+                    location_match = re.search(
+                        r'([^,]+),\s*([A-Z]{2})', address_text)
+                    if location_match:
+                        return f"{location_match.group(1)}, {location_match.group(2)}"
+                    return address_text
+
+                # Try meta tags
+                meta_location = self.soup.find("meta", {"property": "og:locality"})
+                meta_region = self.soup.find("meta", {"property": "og:region"})
+                if meta_location and meta_region:
+                    return f"{meta_location['content']}, {meta_region['content']}"
+
+                # Try extracting from URL
+                path_parts = urlparse(self.url).path.split('/')
+                if len(path_parts) > 2:
+                    address_part = path_parts[2]  # /homedetails/[address-slug]/
+                    location_match = re.search(
+                        r'([A-Za-z-]+)-([A-Z]{2})-\d+$', address_part)
+                    if location_match:
+                        city = location_match.group(1).replace('-', ' ').title()
+                        state = location_match.group(2).upper()
+                        return f"{city}, {state}"
+
+                return "Location Unknown"
+
+        except Exception as e:
+            logger.error(f"Error extracting location: {str(e)}")
+            return "Location Unknown"
+
+    def extract_property_details(self) -> Dict[str, Any]:
+        """Extract comprehensive property details."""
+        details = {}
+
+        try:
+            # Try to extract from JSON data first
+            if self.property_data:
+                # Try to get basic facts
+                if isinstance(self.property_data.get('resoFacts'), dict):
+                    facts = self.property_data['resoFacts']
+                    if 'bedrooms' in facts:
+                        details['bedrooms'] = facts['bedrooms']
+                    if 'bathrooms' in facts:
+                        details['bathrooms'] = facts['bathrooms']
+                    if 'livingArea' in facts:
+                        details['sqft'] = facts['livingArea']
+                    if 'yearBuilt' in facts:
+                        details['year_built'] = facts['yearBuilt']
+
+                # Try alternate locations
+                if 'bedrooms' in self.property_data:
+                    details['bedrooms'] = self.property_data['bedrooms']
+                if 'bathrooms' in self.property_data:
+                    details['bathrooms'] = self.property_data['bathrooms']
+                if 'livingArea' in self.property_data:
+                    details['sqft'] = self.property_data['livingArea']
+                if 'yearBuilt' in self.property_data:
+                    details['year_built'] = self.property_data['yearBuilt']
+
+                # Get description
+                if 'description' in self.property_data:
+                    details['description'] = self.property_data['description']
+
+                # Get features and amenities
+                if isinstance(self.property_data.get('homeFactsList'), list):
+                    features = []
+                    for fact in self.property_data['homeFactsList']:
+                        if isinstance(fact, dict) and 'factLabel' in fact and 'factValue' in fact:
+                            features.append(
+                                f"{fact['factLabel']}: {fact['factValue']}")
+                    if features:
+                        details['features'] = features
+
+            # If we don't have complete details, try extracting from HTML
+            if len(details) < 3:  # If we're missing several key details
+                # Try facts section
+                facts_elem = self.soup.select_one(
+                    ZILLOW_SELECTORS["summary"]["facts"]["selector"])
+                if facts_elem:
+                    facts_text = facts_elem.get_text()
+
+                    # Extract bed/bath/sqft from facts
+                    bed_match = re.search(r'(\d+)\s*beds?', facts_text, re.I)
+                    if bed_match and 'bedrooms' not in details:
+                        details['bedrooms'] = bed_match.group(1)
+
+                    bath_match = re.search(
+                        r'(\d+(?:\.\d+)?)\s*baths?', facts_text, re.I)
+                    if bath_match and 'bathrooms' not in details:
+                        details['bathrooms'] = bath_match.group(1)
+
+                    sqft_match = re.search(
+                        r'(\d+(?:,\d+)?)\s*sq\s*ft', facts_text, re.I)
+                    if sqft_match and 'sqft' not in details:
+                        details['sqft'] = sqft_match.group(1).replace(',', '')
+
+                # Try to get description
+                if 'description' not in details:
+                    desc_elem = self.soup.select_one(
+                        ZILLOW_SELECTORS["description"]["text"])
+                    if desc_elem:
+                        details['description'] = TextProcessor.clean_html_text(
+                            desc_elem.get_text())
+
+                # Try to get features
+                if 'features' not in details:
+                    features_elem = self.soup.select_one(
+                        ZILLOW_SELECTORS["details"]["features"])
+                    if features_elem:
+                        features = []
+                        for li in features_elem.find_all('li'):
+                            feature = TextProcessor.clean_html_text(
+                                li.get_text())
+                            if feature:
+                                features.append(feature)
+                        if features:
+                            details['features'] = features
+
+            return details
+
+        except Exception as e:
+            logger.error(f"Error extracting property details: {str(e)}")
+            return details
 
     def extract_additional_data(self):
         """Extract all additional property information."""
@@ -468,8 +689,77 @@ class ZillowExtractor(BaseExtractor):
             if 'description' in details:
                 self.data["notes"] = details['description']
 
-            # ...rest of additional data extraction...
-            # [The rest of your existing extract_additional_data method would go here]
+            # Extract features for amenities
+            if 'features' in details:
+                existing_amenities = self.data.get("other_amenities", "")
+                new_amenities = " | ".join(details['features'])
+
+                if existing_amenities:
+                    self.data["other_amenities"] = f"{existing_amenities} | {new_amenities}"
+                else:
+                    self.data["other_amenities"] = new_amenities
+
+            # Try to determine listing date
+            if self.property_data:
+                # Try various date fields in Zillow's JSON
+                date_fields = [
+                    'datePosted', 'dateListed', 'listingUpdatedDate',
+                    'lastUpdatedDate', 'postedDate'
+                ]
+
+                for field in date_fields:
+                    if field in self.property_data:
+                        date_value = self.property_data[field]
+                        if isinstance(date_value, str):
+                            try:
+                                date_obj = datetime.fromisoformat(
+                                    date_value.replace('Z', '+00:00'))
+                                self.data["listing_date"] = date_obj
+                                break
+                            except:
+                                pass
+
+            # Process location information for enriched data
+            if self.data["location"] != "Location Unknown":
+                location_info = self.location_service.get_comprehensive_location_info(
+                    self.data["location"])
+
+                # Map location data to schema
+                for key, value in location_info.items():
+                    # Skip existing values
+                    if key in self.data and self.data[key]:
+                        continue
+
+                    # Map keys to match our schema
+                    if key == 'nearest_city':
+                        self.data['nearest_city'] = value
+                    elif key == 'nearest_city_distance':
+                        self.data['nearest_city_distance'] = value
+                    elif key == 'nearest_city_distance_bucket':
+                        self.data['nearest_city_distance_bucket'] = value
+                    elif key == 'distance_to_portland':
+                        self.data['distance_to_portland'] = value
+                    elif key == 'portland_distance_bucket':
+                        self.data['portland_distance_bucket'] = value
+                    elif key == 'town_population':
+                        self.data['town_population'] = value
+                    elif key == 'town_pop_bucket':
+                        self.data['town_pop_bucket'] = value
+                    elif key == 'school_district':
+                        self.data['school_district'] = value
+                    elif key == 'school_rating':
+                        self.data['school_rating'] = value
+                    elif key == 'school_rating_cat':
+                        self.data['school_rating_cat'] = value
+                    elif key == 'hospital_distance':
+                        self.data['hospital_distance'] = value
+                    elif key == 'hospital_distance_bucket':
+                        self.data['hospital_distance_bucket'] = value
+                    elif key == 'closest_hospital':
+                        self.data['closest_hospital'] = value
+                    else:
+                        # Store other properties directly
+                        self.data[key] = value
 
         except Exception as e:
             logger.error(f"Error in additional data extraction: {str(e)}")
@@ -508,7 +798,6 @@ class ZillowExtractor(BaseExtractor):
                 self.data["zpid"] = self.zpid
 
             # STEP 1: Extract minimal core data regardless of blocking
-
             # Always try to get location from URL if nothing else
             location_from_url = self._extract_location_from_url()
             if location_from_url:
@@ -520,7 +809,51 @@ class ZillowExtractor(BaseExtractor):
             if listing_name_from_url:
                 self.data["listing_name"] = listing_name_from_url
 
-            # STEP 2: If not blocked, try to extract more data
+            # STEP 2: If blocked, try to use property records if we have the address
+            if self.is_blocked and location_from_url:
+                # This would attempt to get property data from county records
+                # Extract address and town from location
+                address_match = re.match(
+                    r'^(.+),\s*([^,]+),\s*([A-Z]{2})', self.data["listing_name"])
+                if address_match:
+                    street_address = address_match.group(1).strip()
+                    town = address_match.group(2).strip()
+                    state = address_match.group(3).strip()
+
+                    try:
+                        from ..utils.property_records import MainePropertyRecords
+                        records = MainePropertyRecords()
+                        property_data = records.search_by_address(
+                            street_address, town, state)
+
+                        if property_data and not property_data.get('requires_implementation', True):
+                            # If we got actual data (not just a stub), use it
+                            logger.info(
+                                f"Found property data from county records: {property_data}")
+
+                            # Add property record data to our results
+                            if 'price' in property_data:
+                                self.data["price"] = property_data['price']
+                                if hasattr(self.text_processor, 'standardize_price'):
+                                    _, price_bucket = self.text_processor.standardize_price(
+                                        property_data['price'])
+                                    self.data["price_bucket"] = price_bucket
+
+                            if 'acreage' in property_data:
+                                self.data["acreage"] = property_data['acreage']
+                                if hasattr(self.text_processor, 'standardize_acreage'):
+                                    _, acreage_bucket = self.text_processor.standardize_acreage(
+                                        property_data['acreage'])
+                                    self.data["acreage_bucket"] = acreage_bucket
+
+                            self.data["property_records_source"] = property_data.get(
+                                'source')
+                            self.data["property_records_url"] = property_data.get(
+                                'record_url')
+                    except Exception as e:
+                        logger.error(f"Error getting property records: {e}")
+
+            # STEP 3: If not blocked, try to extract more data
             if not self.is_blocked:
                 # Try to extract JSON data
                 self.property_data = self._extract_json_data()
@@ -589,7 +922,7 @@ class ZillowExtractor(BaseExtractor):
                     "Zillow blocking detected - relying on location services")
                 self.data["extraction_blocked"] = True
 
-            # STEP 3: Always enrich with location services for maximum data
+            # STEP 4: Always enrich with location services for maximum data
             if self.data["location"] != "Location Unknown":
                 logger.info(
                     f"Enriching with location services for: {self.data['location']}")
