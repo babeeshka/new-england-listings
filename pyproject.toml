@@ -3,7 +3,29 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
+# Python paths and modules to add to import search
 pythonpath = ["src"]
+
+# Test discovery
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+python_functions = ["test_*"]
+
+# Test execution
 addopts = "-v --tb=short"
+
+# Test markers
+markers = [
+    "integration: marks tests that make actual API calls (deselect with '-m \"not integration\"')",
+    "slow: marks tests that are slow to execute (deselect with '-m \"not slow\"')",
+    "unit: marks unit tests (select with '-m unit')"
+]
+
+# Filtering
+filterwarnings = [
+    "ignore::DeprecationWarning:distutils.*:",
+    "ignore::DeprecationWarning:pkg_resources.*:"
+]
+
+# Miscellaneous
+xvs = true  # Verbose output for expected exceptions

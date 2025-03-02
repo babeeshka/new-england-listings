@@ -1,4 +1,4 @@
-# tests/test_extractors/test_landsearch_extractor.py
+# tests/test_extractors/test_landsearch.py
 import pytest
 from unittest.mock import patch, MagicMock
 from bs4 import BeautifulSoup
