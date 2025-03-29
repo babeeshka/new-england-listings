@@ -309,6 +309,7 @@ class FarmlandExtractor(BaseExtractor):
 
         return "Untitled Farm Property"
 
+
     def extract_location(self) -> str:
         """Extract location information with enhanced accuracy."""
         logger.debug("Extracting location...")
@@ -327,7 +328,13 @@ class FarmlandExtractor(BaseExtractor):
                         if location and any(s in location.upper() for s in ['ME', 'VT', 'NH', 'MA', 'CT', 'RI']):
                             return location
 
-                # If no direct location found, try constructing from URL
+                # Try to extract from URL as a more reliable second option
+                url_location = self._extract_location_from_url()
+                if url_location:
+                    logger.debug(f"Extracted location from URL: {url_location}")
+                    return url_location
+
+                # Use the fallback URL data
                 if 'location' in self.url_data:
                     return self.url_data['location']
 
@@ -345,6 +352,12 @@ class FarmlandExtractor(BaseExtractor):
 
             except Exception as e:
                 logger.warning(f"Error extracting location: {str(e)}")
+                # Fallback to URL extraction on error
+                url_location = self._extract_location_from_url()
+                if url_location:
+                    return url_location
+                if 'location' in self.url_data:
+                    return self.url_data['location']
 
         else:
             # Try page-specific selectors first
@@ -376,6 +389,85 @@ class FarmlandExtractor(BaseExtractor):
             return location_from_url
 
         return "Location Unknown"
+
+    def _extract_location_from_url(self) -> Optional[str]:
+        """Extract location directly from URL with improved state detection."""
+        try:
+            url_parts = self.url.split('/')[-1].split('-')
+
+            # Check for state code at the end (common pattern)
+            if len(url_parts) > 0:
+                last_part = url_parts[-1].upper()
+                if last_part in ['ME', 'VT', 'NH', 'MA', 'CT', 'RI']:
+                    # The part before the state is likely the town
+                    if len(url_parts) > 1:
+                        town = url_parts[-2].replace('-', ' ').title()
+                        return f"{town}, {last_part}"
+
+            # Try more general state detection
+            for i, part in enumerate(url_parts):
+                if part.upper() in ['ME', 'VT', 'NH', 'MA', 'CT', 'RI']:
+                    # Found a state code, the part before is likely the town
+                    if i > 0:
+                        town = url_parts[i-1].replace('-', ' ').title()
+                        return f"{town}, {part.upper()}"
+
+            # Look for common location patterns in the URL
+            state_pattern = r'([a-zA-Z-]+)[/-]([A-Z]{2})(?:[/-]|$)'
+            state_match = re.search(state_pattern, self.url)
+            if state_match:
+                town = state_match.group(1).replace('-', ' ').title()
+                state = state_match.group(2).upper()
+                return f"{town}, {state}"
+
+            return None
+        except Exception as e:
+            logger.warning(f"Error extracting location from URL: {str(e)}")
+            return None
+
+
+    def _extract_from_url(self):
+        """Extract information from the URL as a fallback."""
+        url_parts = self.url.split('/')[-1].split('-')
+        data = {}
+
+        # Try to extract acreage
+        acreage_pattern = r'(\d+)[\s-]acres?'
+        acreage_match = re.search(acreage_pattern, self.url, re.I)
+        if acreage_match:
+            data['acreage'] = f"{acreage_match.group(1)} acres"
+            acreage_value = float(acreage_match.group(1))
+            # Set acreage bucket
+            data['acreage_bucket'] = self.location_service.get_bucket(
+                acreage_value,
+                {1: "Tiny (Under 1 acre)", 5: "Small (1-5 acres)", 20: "Medium (5-20 acres)",
+                50: "Large (20-50 acres)", 100: "Very Large (50-100 acres)",
+                float('inf'): "Extensive (100+ acres)"}
+            )
+
+        # Extract location using the dedicated method
+        location = self._extract_location_from_url()
+        if location:
+            data['location'] = location
+
+        # Try to extract property type
+        if 'farmland' in self.url.lower():
+            data['property_type'] = "Farm"
+
+        # Try to extract listing name
+        if len(url_parts) > 2:
+            name_parts = []
+            for part in url_parts:
+                if part.lower() not in ['acres', 'for', 'sale', 'lease', 'rent', 'county', 'me', 'vt', 'nh', 'ma', 'ct', 'ri', 'farmland']:
+                    name_parts.append(part.replace('-', ' ').title())
+                if len(name_parts) >= 3:  # Limit to first few meaningful parts
+                    break
+
+            if name_parts:
+                data['listing_name'] = ' '.join(name_parts)
+
+        return data
+
 
     def _validate_county(self, county: str) -> bool:
         """Validate Maine county name."""
