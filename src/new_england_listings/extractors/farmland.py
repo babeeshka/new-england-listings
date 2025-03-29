@@ -905,28 +905,70 @@ class FarmlandExtractor(BaseExtractor):
         if features:
             self.data["property_features"] = " | ".join(features)
 
-    def _extract_dates(self):
-        """Extract listing dates and other temporal information."""
-        # Posted date
-        date_elem = self.soup.find(
-            string=lambda x: x and "Date posted" in str(x))
-        if date_elem:
-            date_value = date_elem.find_next("div")
-            if date_value:
-                date_str = DateExtractor.parse_date_string(
-                    TextProcessor.clean_html_text(date_value.text)
-                )
-                if date_str:
-                    self.data["listing_date"] = date_str
+    def extract_listing_date(self) -> Optional[datetime]:
+        """Extract the listing date from the page."""
+        try:
+            # Look for time elements which often contain structured dates
+            time_elements = self.soup.find_all('time')
+            if time_elements:
+                for time_elem in time_elements:
+                    # Prefer the datetime attribute (machine-readable)
+                    if time_elem.has_attr('datetime'):
+                        datetime_str = time_elem['datetime']
+                        try:
+                            # Handle ISO format with timezone
+                            if '-' in datetime_str and 'T' in datetime_str:
+                                # Parse ISO format date
+                                date_obj = datetime.fromisoformat(
+                                    datetime_str.replace('Z', '+00:00'))
+                                return date_obj
+                        except (ValueError, TypeError):
+                            # If datetime attribute parsing fails, try the text content
+                            pass
 
-        # Any additional dates (availability, etc.)
-        availability_elem = self.soup.find(
-            string=lambda x: x and "Date available" in str(x))
-        if availability_elem:
-            avail_value = availability_elem.find_next("div")
-            if avail_value:
-                self.data["available_date"] = TextProcessor.clean_html_text(
-                    avail_value.text)
+                    # Try the text content as fallback
+                    date_text = time_elem.get_text().strip()
+                    if date_text:
+                        try:
+                            # Try common date formats
+                            for fmt in ["%B %d, %Y", "%m/%d/%Y", "%Y-%m-%d"]:
+                                try:
+                                    return datetime.strptime(date_text, fmt)
+                                except ValueError:
+                                    continue
+                        except Exception:
+                            pass
+
+            # If no time elements, look for date patterns in text
+            text = self.soup.get_text()
+            date_patterns = [
+                # Posted on February 23, 2025
+                r'(?:Posted|Listed|Added)(?:\s+on)?\s+(\w+\s+\d{1,2},\s+\d{4})',
+                # Date: February 23, 2025
+                r'(?:Date|Listing date):\s+(\w+\s+\d{1,2},\s+\d{4})',
+                r'(\d{1,2}/\d{1,2}/\d{4})'  # 02/23/2025
+            ]
+
+            for pattern in date_patterns:
+                match = re.search(pattern, text)
+                if match:
+                    date_text = match.group(1)
+                    try:
+                        # Try different formats based on what matched
+                        if '/' in date_text:
+                            return datetime.strptime(date_text, "%m/%d/%Y")
+                        else:
+                            return datetime.strptime(date_text, "%B %d, %Y")
+                    except ValueError:
+                        pass
+
+            # If all else fails, use today's date
+            logger.warning("Could not extract listing date, using current date")
+            return datetime.now()
+
+        except Exception as e:
+            logger.error(f"Error extracting listing date: {e}")
+            return None
 
     def extract_additional_data(self):
         """Extract all additional property information."""

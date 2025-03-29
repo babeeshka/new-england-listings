@@ -185,17 +185,52 @@ class NotionClient:
             }
         }
 
-        # Optional fields with proper typing
+        # Format listing_date as a proper Notion date
         if validated_data.listing_date:
-            # Format date as text since we're using rich_text for dates
+            # Handle different date formats
             if isinstance(validated_data.listing_date, datetime):
-                date_str = validated_data.listing_date.strftime("%Y-%m-%d")
-            else:
-                date_str = safe_str(validated_data.listing_date)
+                # Direct datetime object
+                properties["Listing Date"] = {
+                    "date": {
+                        "start": validated_data.listing_date.strftime("%Y-%m-%d")
+                    }
+                }
+            elif isinstance(validated_data.listing_date, str):
+                try:
+                    # Try different date formats
+                    date_formats = [
+                        "%Y-%m-%d",           # 2025-02-23
+                        "%Y-%m-%dT%H:%M:%S",  # 2025-02-23T09:23:24
+                        "%B %d, %Y",          # February 23, 2025
+                        "%m/%d/%Y"            # 02/23/2025
+                    ]
 
-            properties["Listing Date"] = {
-                "rich_text": [{"text": {"content": date_str}}]
-            }
+                    for fmt in date_formats:
+                        try:
+                            date_obj = datetime.strptime(
+                                validated_data.listing_date, fmt)
+                            properties["Listing Date"] = {
+                                "date": {
+                                    "start": date_obj.strftime("%Y-%m-%d")
+                                }
+                            }
+                            break
+                        except ValueError:
+                            continue
+                    else:
+                        # If no format matched, store as text instead
+                        logger.warning(
+                            f"Could not parse listing date: {validated_data.listing_date}")
+                        properties["Notes"] = {
+                            "rich_text": [{"text": {"content": f"Listing Date: {validated_data.listing_date} (unparseable format)"}}]
+                        }
+                except Exception as e:
+                    logger.error(f"Error formatting listing date: {e}")
+                    # Don't include the listing date if we can't format it
+            else:
+                # Don't include unparseable dates
+                logger.warning(
+                    f"Unsupported listing date type: {type(validated_data.listing_date)}")
 
         # Location Metrics (as numbers)
         if validated_data.distance_to_portland is not None:
